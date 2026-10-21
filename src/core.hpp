@@ -134,6 +134,7 @@ void apply_vmx_patches(const Profile& profile, std::vector<uint8_t>& data, Repor
 Result patch_vmx(const Profile& profile, const Options& options, const Log& log);
 Result patch_efi(const Profile& profile, const Options& options, const Log& log);
 Result patch_all(const Profile& profile, const Options& options, const Log& log);
+Result patch_driver(const Profile& profile, const Options& options, const Log& log);
 Result verify(const Profile& profile, const Options& options, const Log& log);
 Result restore_vmware(const Profile& profile, const Options& options, const Log& log);
 Result manifest_diff(const fs::path& original, const fs::path& patched, const fs::path& out,

@@ -30,6 +30,8 @@ void usage() {
         "  vmspoof patch-efi --profile <nombre|ruta> --in <rom> --out <rom> [opciones]\n"
         "  vmspoof patch-all --profile <nombre|ruta> [--in-exe <exe>] [--in-efi <rom>]\n"
         "                    [--out-dir <dir>] [--vmx <ruta.vmx>] [opciones]\n"
+        "  vmspoof patch-driver --profile <nombre|ruta> [--in <carpeta del driver>]\n"
+        "                    [--out-dir <dir>] [--svga-id VID:DID] [--dry-run]\n"
         "  vmspoof verify    --profile <nombre|ruta> --vmx-exe <exe> --efi <rom> [--json-report <json>]\n"
         "  vmspoof restore   --profile <nombre|ruta> [--in-exe <exe>] [--in-efi <rom>]\n"
         "                    [--vmx <ruta.vmx>] [--dry-run] [--json-report <json>]\n"
@@ -174,6 +176,17 @@ int run(int argc, wchar_t** argv) {
         if (a.values.count(L"--in-efi")) o.in_efi = fs::path(optional(a, L"--in-efi"));
         if (a.values.count(L"--out-dir")) o.out_dir = fs::path(optional(a, L"--out-dir"));
         Result r = patch_all(profile, o, log);
+        print_summary(r);
+        return r.ok ? 0 : 1;
+    }
+    if (a.command == L"patch-driver") {
+        check_options(a, {L"--profile", L"--in", L"--out-dir", L"--json-report", L"--svga-id"},
+                      {L"--dry-run"});
+        Profile profile = resolve_profile(to_utf8(require(a, L"--profile")));
+        Options o = make_options(a);
+        if (a.values.count(L"--in")) o.in = fs::path(optional(a, L"--in"));
+        if (a.values.count(L"--out-dir")) o.out_dir = fs::path(optional(a, L"--out-dir"));
+        Result r = patch_driver(profile, o, log);
         print_summary(r);
         return r.ok ? 0 : 1;
     }

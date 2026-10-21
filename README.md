@@ -43,8 +43,11 @@ Doble clic en `build\vmspoof-gui.exe` (pide elevación: instala directamente en 
   `back up\` como entrada si existen.
 - **No hay carpeta de salida**: `Instalar patch` parchea en `%TEMP%` y reemplaza
   `vmware-vmx.exe` / `EFI64.ROM` en `...\VMware Workstation\x64\` con backup atómico.
-- Botones: `Instalar patch` (ambos), `Solo .exe`, `Solo EFI`, `Verificar`,
-  `Restaurar` (originales), y `Configurar VM` para `efi64.filename`.
+- Botones: `Instalar patch` (ambos), `Solo .exe`, `Solo EFI`, `Generar driver`,
+  `Verificar`, `Restaurar` (originales), y `Configurar VM` para `efi64.filename`.
+- `Generar driver` copia el paquete `oem5.inf_amd64_...` a `dist\driver`, cambia el
+  hardware ID del INF y los VID/DID de `vm3dgl*.dll` a los del perfil/IDs personalizados,
+  y quita el `.PNF` cacheado. No instala el driver.
 - Opciones: `Sobrescribir`, `Dry-run`, `Configurar VM`, `IDs personalizados`.
 - El log muestra offsets, hashes, tamaño comprimido y errores; la píldora de estado
   pasa a `OK` o `Error`.
@@ -74,6 +77,8 @@ borra el NVRAM ni el ROM copiado en la carpeta de la VM.
 vmspoof patch-vmx --profile fullspoof --in "back up\vmware-vmx.exe" --out dist\vmware-vmx.patched.exe
 vmspoof patch-efi --profile fullspoof --in "back up\EFI64.ROM" --out dist\EFI64.patched
 vmspoof patch-all --profile fullspoof --vmx "C:\VMs\Win11\Win11.vmx"
+vmspoof patch-driver --profile fullspoof --out-dir dist\driver
+vmspoof patch-driver --profile fullspoof --in "oem5.inf_amd64_e19680a0353534c1" --svga-id 1002:1B80
 vmspoof verify --profile fullspoof --vmx-exe dist\vmware-vmx.patched.exe --efi dist\EFI64.patched
 vmspoof restore --profile fullspoof --in-exe "back up\vmware-vmx.exe" --in-efi "back up\EFI64.ROM"
 vmspoof manifest-diff --original "back up\vmware-vmx.exe" --patched vmware-vmx.exe --out dist\manifest.json --force
@@ -120,6 +125,13 @@ produce un stream idéntico bit a bit al de liblzma). Lo que importa, y se verif
   - `0x1CE759..0x1CE75C` (AHCI `8086:A114`)
   - `0x314355..0x314358` (SVGA `10DE:1001`)
 - Con `gpu-only`, solo cambian los 4 bytes de SVGA.
+
+`patch-driver` busca el paquete `oem5.inf_amd64_*` junto al ejecutable o al repo
+(también acepta `--in <carpeta>` o `VMSPOOF_DRIVER_DIR`). Genera la carpeta visible
+`dist\driver` con el INF y las DLLs ajustadas al VID/DID del perfil. El INF y los
+`vm3dgl*.dll` modificados ya no coinciden con `vm3d.cat`, así que el driver se instala
+igual que el paquete original modificado: con la comprobación de firma desactivada
+(modo de pruebas). Incluye un `LEEME.txt` con el comando `pnputil`.
 
 ## Perfiles
 

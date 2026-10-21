@@ -1269,6 +1269,184 @@ Result run_guarded(const std::string& command, const Profile& profile, const Log
 
 std::vector<uint8_t> pattern_vec(const auto& arr) { return {arr.begin(), arr.end()}; }
 
+std::string hex4_upper(uint16_t v) {
+    char buf[5];
+    std::snprintf(buf, sizeof(buf), "%04X", unsigned(v));
+    return buf;
+}
+
+bool is_driver_dir(const fs::path& dir) {
+    std::error_code ec;
+    if (!fs::is_directory(dir, ec) || !fs::exists(dir / "vm3dmp.sys", ec)) return false;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (entry.is_regular_file() && iequals(entry.path().extension().string(), ".inf")) return true;
+    }
+    return false;
+}
+
+fs::path find_driver_dir(const fs::path& explicit_dir) {
+    if (!explicit_dir.empty()) {
+        if (is_driver_dir(explicit_dir)) return explicit_dir;
+        fail("driver: no es un paquete vm3d (falta vm3dmp.sys o .inf): " + to_utf8(explicit_dir));
+    }
+    if (const wchar_t* env = _wgetenv(L"VMSPOOF_DRIVER_DIR")) {
+        if (*env) {
+            const fs::path p(env);
+            if (is_driver_dir(p)) return p;
+            fail("VMSPOOF_DRIVER_DIR no es un paquete vm3d: " + to_utf8(p));
+        }
+    }
+    const std::vector<fs::path> bases = {exe_dir() / "..", exe_dir(), fs::current_path(),
+                                         fs::current_path() / ".."};
+    for (const auto& base : bases) {
+        const fs::path norm = base.lexically_normal();
+        for (const char* name : {"oem5.inf_amd64_e19680a0353534c1", "driver"}) {
+            const fs::path candidate = norm / name;
+            if (is_driver_dir(candidate)) return candidate;
+        }
+        std::error_code ec;
+        for (const auto& entry : fs::directory_iterator(norm, ec)) {
+            if (ec) break;
+            if (!entry.is_directory()) continue;
+            const std::string fn = entry.path().filename().string();
+            if (fn.rfind("oem", 0) != 0 || fn.find(".inf_amd64_") == std::string::npos) continue;
+            if (is_driver_dir(entry.path())) return entry.path();
+        }
+    }
+    fail("driver: no se encontró el paquete (usa --in <carpeta> o VMSPOOF_DRIVER_DIR)");
+}
+
+fs::path find_inf_file(const fs::path& dir) {
+    std::error_code ec;
+    std::vector<fs::path> infs;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (entry.is_regular_file() && iequals(entry.path().extension().string(), ".inf"))
+            infs.push_back(entry.path());
+    }
+    if (infs.empty()) fail("driver: no hay .inf en " + to_utf8(dir));
+    for (const char* preferred : {"oem5.inf", "vm3d.inf"}) {
+        for (const auto& path : infs)
+            if (iequals(path.filename().string(), preferred)) return path;
+    }
+    return infs.front();
+}
+
+std::pair<size_t, size_t> patch_inf_ids(std::string& text, uint16_t vid, uint16_t did) {
+    const std::string new_vid = hex4_upper(vid);
+    const std::string new_did = hex4_upper(did);
+    auto is_hex4 = [](std::string_view s) {
+        return s.size() >= 4 &&
+               std::all_of(s.begin(), s.begin() + 4, [](char c) {
+                   return std::isxdigit(static_cast<unsigned char>(c)) != 0;
+               });
+    };
+
+    size_t found = 0;
+    size_t changed = 0;
+    size_t line_start = 0;
+    while (line_start <= text.size()) {
+        size_t line_end = text.find('\n', line_start);
+        if (line_end == std::string::npos) line_end = text.size();
+        std::string line = text.substr(line_start, line_end - line_start);
+        if (line.find("VM3D_AMD64") != std::string::npos) {
+            const size_t ven = line.find("PCI\\VEN_");
+            const size_t dev = ven == std::string::npos ? std::string::npos : line.find("&DEV_", ven);
+            if (ven != std::string::npos && dev != std::string::npos && ven + 12 <= line.size() &&
+                dev + 9 <= line.size() && is_hex4(line.substr(ven + 8, 4)) &&
+                is_hex4(line.substr(dev + 5, 4))) {
+                ++found;
+                if (line.compare(ven + 8, 4, new_vid) != 0 || line.compare(dev + 5, 4, new_did) != 0)
+                    ++changed;
+                line.replace(ven + 8, 4, new_vid);
+                line.replace(dev + 5, 4, new_did);
+                text.replace(line_start, line_end - line_start, line);
+            }
+        }
+        if (line_end == text.size()) break;
+        line_start = line_end + 1;
+    }
+    return {found, changed};
+}
+
+void copy_driver_package(const fs::path& src, const fs::path& dst, const fs::path& inf,
+                         const std::vector<uint8_t>& inf_data, const Log& log) {
+    std::error_code ec;
+    if (fs::exists(dst, ec) && fs::equivalent(src, dst, ec))
+        fail("driver: la salida no puede ser la carpeta de origen");
+    if (!fs::exists(dst, ec)) {
+        fs::create_directories(dst, ec);
+        if (ec) fail("driver: no se pudo crear " + to_utf8(dst) + ": " + ec.message());
+    } else if (!fs::is_directory(dst, ec)) {
+        fail("driver: la salida no es una carpeta: " + to_utf8(dst));
+    }
+
+    // ponytail: el PNF cachea el INF viejo; no se copia y se borra si ya existía.
+    for (const auto& entry : fs::directory_iterator(dst, ec)) {
+        if (entry.is_regular_file() && iequals(entry.path().extension().string(), ".pnf"))
+            fs::remove(entry.path(), ec);
+    }
+    ec.clear();
+    for (const auto& entry : fs::directory_iterator(src, ec)) {
+        if (!entry.is_regular_file()) continue;
+        if (iequals(entry.path().extension().string(), ".pnf")) continue;
+        if (entry.path().filename() == inf.filename()) continue;
+        fs::copy_file(entry.path(), dst / entry.path().filename(),
+                      fs::copy_options::overwrite_existing, ec);
+        if (ec) fail("driver: no se pudo copiar " + to_utf8(entry.path()) + ": " + ec.message());
+    }
+    write_file_atomic(dst / inf.filename(), inf_data, true);
+    log_line(log, "driver: paquete copiado a " + to_utf8(dst));
+}
+
+void patch_gl_dll_ids(const fs::path& path, uint16_t vid, uint16_t did, const Log& log) {
+    std::error_code ec;
+    if (!fs::exists(path, ec)) return;
+    auto data = read_file(path);
+    const std::array<uint8_t, 5> old_vid = {0xB8, 0xAD, 0x15, 0x00, 0x00};
+    const std::array<uint8_t, 5> old_did = {0xB8, 0x05, 0x04, 0x00, 0x00};
+    auto v = std::search(data.begin(), data.end(), old_vid.begin(), old_vid.end());
+    if (v == data.end()) {
+        log_line(log, "driver: " + path.filename().string() +
+                          ": no se encontró el VID 15AD; se deja sin cambios.");
+        return;
+    }
+    const size_t vpos = size_t(v - data.begin());
+    const auto end = data.begin() + std::ptrdiff_t(std::min<size_t>(data.size(), vpos + 64));
+    auto d = std::search(data.begin() + std::ptrdiff_t(vpos + 5), end, old_did.begin(), old_did.end());
+    if (d == data.end()) {
+        log_line(log, "driver: " + path.filename().string() +
+                          ": no se encontró el DID 0405 junto al VID; se deja sin cambios.");
+        return;
+    }
+    if (vid == 0x15AD && did == 0x0405) return;
+    const size_t dpos = size_t(d - data.begin());
+    data[vpos + 1] = uint8_t(vid);
+    data[vpos + 2] = uint8_t(vid >> 8);
+    data[dpos + 1] = uint8_t(did);
+    data[dpos + 2] = uint8_t(did >> 8);
+    write_file_atomic(path, data, true);
+    log_line(log, "driver: " + path.filename().string() + ": IDs -> " + hex4_upper(vid) + ":" +
+                      hex4_upper(did));
+}
+
+void write_driver_readme(const fs::path& dst, const fs::path& inf, uint16_t vid, uint16_t did) {
+    const std::string name = inf.filename().string();
+    const std::string text =
+        "Driver VMware SVGA parcheado para PCI\\VEN_" + hex4_upper(vid) + "&DEV_" +
+        hex4_upper(did) +
+        ".\n\n"
+        "Instalar (consola elevada):\n"
+        "  pnputil /add-driver \"" + name + "\" /install\n\n"
+        "También puedes usar clic derecho > Instalar sobre " + name + ".\n"
+        "Reinicia la VM después de instalar el driver.\n"
+        "El .inf y vm3dgl*.dll modificados no coinciden con vm3d.cat: Windows debe tener\n"
+        "desactivada la comprobación de firma de controladores (modo de pruebas), igual que\n"
+        "el driver original.\n";
+    std::vector<uint8_t> bytes = {0xEF, 0xBB, 0xBF};
+    bytes.insert(bytes.end(), text.begin(), text.end());
+    write_file_atomic(dst / "LEEME.txt", bytes, true);
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -1526,6 +1704,52 @@ Result patch_all(const Profile& profile, const Options& options, const Log& log)
         const std::string prefix = options.dry_run ? "dry-run, se habría generado: " : "Listo. ";
         log_line(log, prefix + ".exe: " + to_utf8(out_exe));
         log_line(log, prefix + "EFI: " + to_utf8(out_efi));
+    });
+}
+
+Result patch_driver(const Profile& profile_in, const Options& options, const Log& log) {
+    return run_guarded("patch-driver", profile_in, log, [&](Report& r) {
+        const Profile profile = effective_profile(profile_in, options, log);
+        if (!profile.svga.patch)
+            fail("driver: el perfil no parchea SVGA; no hay IDs nuevos que aplicar");
+        const uint16_t vid = profile.svga.vid;
+        const uint16_t did = profile.svga.did;
+
+        const fs::path src = find_driver_dir(options.in);
+        const fs::path inf = find_inf_file(src);
+        const fs::path out_dir =
+            options.out_dir.empty() ? default_out_dir() / "driver" : options.out_dir;
+
+        const auto inf_bytes = read_file(inf);
+        std::string text(inf_bytes.begin(), inf_bytes.end());
+        const auto [found, changed] = patch_inf_ids(text, vid, did);
+        if (found == 0)
+            fail("driver: no se encontraron líneas 'VM3D_AMD64 ... PCI\\VEN_...' en " + to_utf8(inf));
+        const std::vector<uint8_t> patched(text.begin(), text.end());
+
+        r.in_path = to_utf8(src);
+        r.out_path = to_utf8(out_dir);
+        r.in_size = inf_bytes.size();
+        r.out_size = patched.size();
+        r.in_sha256 = sha256_hex(inf_bytes);
+        r.out_sha256 = sha256_hex(patched);
+        log_line(log, "Driver origen: " + to_utf8(src));
+        log_line(log, "INF " + to_utf8(inf.filename()) + ": PCI\\VEN_" + hex4_upper(vid) + "&DEV_" +
+                          hex4_upper(did) + " (" + std::to_string(found) + " líneas, " +
+                          std::to_string(changed) + " cambios)");
+
+        if (options.dry_run) {
+            log_line(log, "dry-run: no se escribió " + to_utf8(out_dir));
+            return;
+        }
+
+        copy_driver_package(src, out_dir, inf, patched, log);
+        patch_gl_dll_ids(out_dir / "vm3dgl.dll", vid, did, log);
+        patch_gl_dll_ids(out_dir / "vm3dgl64.dll", vid, did, log);
+        write_driver_readme(out_dir, inf, vid, did);
+        log_line(log, "Driver listo para instalar: " + to_utf8(out_dir));
+        r.ok = true;
+        write_report_if_requested(options.report, r.to_json());
     });
 }
 

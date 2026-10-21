@@ -80,6 +80,49 @@ void test_profiles(const fs::path&) {
     for (const auto& p : gpu.patches) CHECK(p.cat == "svga");
 }
 
+void test_driver_patch(const fs::path& dir) {
+    const fs::path src = dir / "driver-src";
+    const fs::path out = dir / "driver-out";
+    std::error_code ec;
+    fs::create_directories(src, ec);
+
+    const std::string inf =
+        "[Version]\r\nCatalogFile = vm3d.cat\r\n\r\n[Manufacturer]\r\n"
+        "%SVGA% = VM3D_AMD64, PCI\\VEN_15AD&DEV_0405&SUBSYS_040515AD&REV_00\r\n"
+        "%SVGA% = VM3D_AMD64, PCI\\VEN_15AD&DEV_0405&SUBSYS_00000000&REV_00\r\n";
+    write_file_atomic(src / "oem5.inf", std::vector<uint8_t>(inf.begin(), inf.end()), true);
+    write_file_atomic(src / "vm3dmp.sys", {0x4D, 0x5A}, true);
+    write_file_atomic(src / "oem5.PNF", {0x50, 0x4E, 0x46}, true);
+    const std::vector<uint8_t> gl = {0xB8, 0xAD, 0x15, 0x00, 0x00, 0xB8, 0x05, 0x04, 0x00, 0x00};
+    write_file_atomic(src / "vm3dgl.dll", gl, true);
+    write_file_atomic(src / "vm3dgl64.dll", gl, true);
+
+    Profile p;
+    p.name = "driver-test";
+    p.svga = {0x1002, 0x1B80, true};
+    Options o;
+    o.in = src;
+    o.out_dir = out;
+    Result r = patch_driver(p, o, quiet);
+    CHECK(r.ok);
+
+    auto patched_inf = read_file(out / "oem5.inf");
+    const std::string text(patched_inf.begin(), patched_inf.end());
+    CHECK(text.find("VEN_1002&DEV_1B80") != std::string::npos);
+    CHECK(text.find("VEN_15AD&DEV_0405") == std::string::npos);
+    CHECK(!file_exists(out / "oem5.PNF"));
+    CHECK(file_exists(out / "LEEME.txt"));
+
+    auto patched_gl = read_file(out / "vm3dgl.dll");
+    CHECK(patched_gl.size() == gl.size());
+    CHECK(patched_gl[1] == 0x02 && patched_gl[2] == 0x10);
+    CHECK(patched_gl[6] == 0x80 && patched_gl[7] == 0x1B);
+
+    auto original_inf = read_file(src / "oem5.inf");
+    CHECK(std::string(original_inf.begin(), original_inf.end()).find("VEN_15AD&DEV_0405") !=
+          std::string::npos);
+}
+
 void test_coherence_negative(const fs::path& dir) {
     const fs::path bad = dir / "bad-profile.json";
     std::string json = R"({
@@ -518,6 +561,7 @@ int main() {
     const fs::path efi = env_w(L"VMSPOOF_EFI_ORIG", L"back up\\EFI64.ROM");
 
     test_profiles(dir);
+    test_driver_patch(dir);
     test_coherence_negative(dir);
     test_orig_validation();
     test_lzma_roundtrip();

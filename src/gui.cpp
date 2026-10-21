@@ -65,6 +65,7 @@ enum class Action {
     Primary,
     OnlyExe,
     OnlyEfi,
+    Driver,
     Verify,
     Restore,
     ProfileFull,
@@ -80,7 +81,7 @@ enum class Action {
 };
 
 enum class Status { Idle, Running, Ok, Error };
-enum class Job { All, Exe, Efi, Verify, Restore };
+enum class Job { All, Exe, Efi, Driver, Verify, Restore };
 
 struct Hit {
     RECT rect{};
@@ -358,7 +359,7 @@ void start_job(App& a, Job job) {
     a.efi = get_text(a.eEfi);
     a.vmx = get_text(a.eVmx);
 
-    if (a.optVmx && a.vmx.empty()) {
+    if (job != Job::Driver && a.optVmx && a.vmx.empty()) {
         set_status(a, Status::Error, L"Falta el .vmx");
         append_log(a.eLog, L"Error: activaste 'Configurar VM' pero no indicaste el .vmx");
         return;
@@ -382,7 +383,7 @@ void start_job(App& a, Job job) {
     Options o;
     o.force = a.optForce;
     o.dry_run = a.optDry;
-    o.install = job != Job::Verify && job != Job::Restore;
+    o.install = job != Job::Verify && job != Job::Restore && job != Job::Driver;
     const fs::path stage = fs::temp_directory_path() /
         ("vmspoof-" + std::to_string(GetCurrentProcessId()) + "-" +
          std::to_string(GetTickCount64()));
@@ -432,6 +433,10 @@ void start_job(App& a, Job job) {
         o.out = stage / "EFI64.patched";
         what = L"Instalar EFI64.ROM";
         break;
+    case Job::Driver:
+        o.out_dir = default_out_dir() / "driver";
+        what = L"Generar driver";
+        break;
     case Job::Verify:
         o.in = default_exe_path();
         o.out = default_efi_path();
@@ -464,6 +469,7 @@ void start_job(App& a, Job job) {
             case Job::All: r = patch_all(profile, o, log); break;
             case Job::Exe: r = patch_vmx(profile, o, log); break;
             case Job::Efi: r = patch_efi(profile, o, log); break;
+            case Job::Driver: r = patch_driver(profile, o, log); break;
             case Job::Verify: r = verify(profile, o, log); break;
             case Job::Restore: r = restore_vmware(profile, o, log); break;
             }
@@ -561,6 +567,7 @@ void handle_action(App& a, Action action) {
     case Action::Primary: start_job(a, Job::All); break;
     case Action::OnlyExe: start_job(a, Job::Exe); break;
     case Action::OnlyEfi: start_job(a, Job::Efi); break;
+    case Action::Driver: start_job(a, Job::Driver); break;
     case Action::Verify: start_job(a, Job::Verify); break;
     case Action::Restore: {
         const int r = MessageBoxW(
@@ -789,6 +796,7 @@ void render(App& a, HDC dc, const RECT& client) {
     button(advance(152), L"Instalar patch", true, false, idle, Action::Primary);
     button(advance(92), L"Solo .exe", false, false, idle, Action::OnlyExe);
     button(advance(88), L"Solo EFI", false, false, idle, Action::OnlyEfi);
+    button(advance(120), L"Generar driver", false, false, idle, Action::Driver);
     button(advance(92), L"Verificar", false, false, idle, Action::Verify);
     button(advance(100), L"Restaurar", false, true, idle, Action::Restore);
 
