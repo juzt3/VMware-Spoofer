@@ -1,0 +1,18 @@
+# build output
+/build/
+/dist/
+/backup-*/
+/.kilo/
+
+# temporales
+*.tmp
+*.obj
+*.pdb
+*.ilk
+
+# binarios de VMware / artefactos de referencia (no se commitean)
+/vmware-vmx.exe
+/EFI64.ROM
+/back up/
+/oem5.inf_amd64_e19680a0353534c1/
+/NemiVM.vmx
