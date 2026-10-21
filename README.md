@@ -47,7 +47,7 @@ Doble clic en `build\vmspoof-gui.exe` (pide elevación: instala directamente en 
 - **No hay carpeta de salida**: `Instalar patch` parchea en `%TEMP%` y reemplaza
   `vmware-vmx.exe` / `EFI64.ROM` en `...\VMware Workstation\x64\` con backup atómico.
 - Botones: `Instalar patch` (ambos), `Solo .exe`, `Solo EFI`, `Generar driver`,
-  `Verificar`, `Restaurar` (originales), y `Configurar VM` para `efi64.filename`.
+  `Verificar`, `Restaurar` (originales), y `Configurar VM` para aplicar hardening al `.vmx`.
 - `Generar driver` extrae `driver.pak`, lo copia a `patched driver\`,
   cambia el hardware ID del INF y los VID/DID de `vm3dgl*.dll` a los del perfil/IDs
   personalizados, y quita el `.PNF` cacheado. No instala el driver.
@@ -71,8 +71,8 @@ Antes de cada instalación se crea:
 4. `VMSPOOF_VMX_ORIG` / `VMSPOOF_EFI_ORIG` y `back up\` junto al repo.
 
 Verifica el hash original, respalda el estado actual y reemplaza de forma atómica.
-Si indicaste un `.vmx`, elimina su línea `efi64.filename` (con backup del `.vmx`). No
-borra el NVRAM ni el ROM copiado en la carpeta de la VM.
+Si indicaste un `.vmx`, elimina el hardening aplicado (con backup del `.vmx`). No
+borra el NVRAM.
 
 ## Salidas
 
@@ -124,19 +124,20 @@ Nota sobre el manifiesto publicado: la entrada `0x8b9488` (modelo del disco SCSI
 los dos terminadores NUL y rompía el hash golden. El perfil del repo usa los 30 bytes
 reales del build de referencia; el hash `BE9AD4...` lo confirma.
 
-## EFI64.ROM en la VM
+## Hardening del .vmx
 
-Por defecto VMware usa su `EFI64.ROM` global. Para usar el parcheado solo en una VM,
-usa `Configurar VM` en la GUI y elige el `.vmx`.
-
-Esto:
+El `EFI64.ROM` se instala globalmente, así que el `.vmx` ya no necesita
+`efi64.filename`. `Configurar VM` en la GUI aplica al `.vmx` elegido el bloque de
+hardening anti-detección de `Windows 10 x64.vmx`:
 
 1. Hace backup del `.vmx` (`*.bak-<timestamp>`).
-2. Copia `EFI64.patched` a la carpeta de la VM.
-3. Agrega o actualiza `efi64.filename = "EFI64.patched"`.
+2. Agrega o actualiza las claves `isolation.*`, `monitor_control.*`, `cpuid.*`
+   (máscara del bit de hypervisor y brand string `Intel(R) Core(TM) i5-7500`),
+   `smbios.*`, `serialNumber.reflectHost`, `board-id.reflectHost`,
+   `hw.model.reflectHost` y `sched.mem.pshare.enable`.
+3. Marca el bloque con `# vmspoof hardening` y quita cualquier `efi64.filename` viejo.
 
-No borra el NVRAM (`nvram = ...`). Si el firmware nuevo no arranca por NVRAM viejo,
-renombra el `.nvram` con la VM apagada para que se regenere.
+`Restaurar` elimina esas claves y el marcador. No borra el NVRAM (`nvram = ...`).
 
 ### Arranque UEFI
 
@@ -183,7 +184,7 @@ Si el archivo de entrada ya está parcheado:
 - La instalación verifica que el destino no esté bloqueado (VM corriendo), crea
   `backup-YYYYMMDD-HHMMSS\` junto al archivo y luego reemplaza.
 - Si un solo `orig` no coincide, no se escribe ninguna salida.
-- El `.exe` parcheado es global; el ROM se puede aislar por VM con `efi64.filename`.
+- El `.exe` y el `EFI64.ROM` parcheados son globales; el hardening del `.vmx` es por VM.
 
 ## Tests
 
@@ -204,7 +205,7 @@ tests\run-tests.cmd
 - golden EFI (solo los 8 bytes esperados, ROM de 2 MiB);
 - errores de hash, salida existente y archivo inexistente;
 - instalación/restauración en una instalación falsa (`VMSPOOF_VMWARE_DIR`): backups,
-  stash `vmspoof-original`, hashes originales y limpieza de `efi64.filename`;
+  stash `vmspoof-original`, hashes originales y limpieza del hardening del `.vmx`;
 - `manifest-diff`.
 
 Rutas configurables:

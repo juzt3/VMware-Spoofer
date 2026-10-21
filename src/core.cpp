@@ -562,73 +562,174 @@ void gate_input(const std::vector<uint8_t>& data, uint64_t expected_size,
     log_line(log, std::string(what) + ": " + std::to_string(data.size()) + " bytes, SHA-256 " + sha);
 }
 
-void configure_vmx(const fs::path& vmx_path, const fs::path& rom_path, bool dry_run, const Log& log) {
-    if (rom_path.empty()) fail("VMX: falta el ROM de salida");
-    std::error_code ec;
-    if (!fs::exists(vmx_path, ec)) fail("VMX: no existe " + to_utf8(vmx_path));
+// ponytail: fixed table copied from "Windows 10 x64.vmx"; extend it if new hardening keys appear.
+constexpr std::pair<std::string_view, std::string_view> kHardening[] = {
+    {"isolation.device.connectable.disable", "TRUE"},
+    {"isolation.device.edit.disable", "TRUE"},
+    {"isolation.tools.setGUIOptions.enable", "FALSE"},
+    {"isolation.tools.hgfs.disable", "TRUE"},
+    {"isolation.tools.hgfsServerSet.disable", "TRUE"},
+    {"isolation.monitor.control.disable", "TRUE"},
+    {"isolation.tools.ghi.autologon.disable", "TRUE"},
+    {"isolation.bios.bbs.disable", "TRUE"},
+    {"isolation.tools.getCreds.disable", "TRUE"},
+    {"isolation.tools.ghi.launchmenu.change", "TRUE"},
+    {"isolation.tools.memSchedFakeSampleStats.disable", "TRUE"},
+    {"isolation.tools.ghi.protocolhandler.info.disable", "TRUE"},
+    {"isolation.ghi.host.shellAction.disable", "TRUE"},
+    {"isolation.tools.dispTopoRequest.disable", "TRUE"},
+    {"isolation.tools.trashFolderState.disable", "TRUE"},
+    {"isolation.tools.ghi.trayicon.disable", "TRUE"},
+    {"isolation.tools.unityInterlockOperation.disable", "TRUE"},
+    {"isolation.tools.unity.taskbar.disable", "TRUE"},
+    {"isolation.tools.unityActive.disable", "TRUE"},
+    {"isolation.tools.unity.windowContents.disable", "TRUE"},
+    {"isolation.tools.unity.push.update.disable", "TRUE"},
+    {"isolation.tools.vmxDnDVersionGet.disable", "TRUE"},
+    {"isolation.tools.guestDnDVersionSet.disable", "TRUE"},
+    {"isolation.tools.diskShrink.disable", "TRUE"},
+    {"isolation.tools.diskWiper.disable", "TRUE"},
+    {"isolation.tools.autoInstall.disable", "TRUE"},
+    {"isolation.tools.vixMessage.disable", "TRUE"},
+    {"isolation.tools.runProgramDone.disable", "TRUE"},
+    {"isolation.tools.osStateChange.disable", "TRUE"},
+    {"isolation.tools.osStateChangeStatus.disable", "TRUE"},
+    {"isolation.tools.setOption.disable", "TRUE"},
+    {"isolation.tools.unifiedLoop.disable", "TRUE"},
+    {"isolation.tools.haltRebootStatus.disable", "TRUE"},
+    {"isolation.tools.getMachineId.disable", "TRUE"},
+    {"isolation.tools.PatchACPITables.disable", "TRUE"},
+    {"isolation.tools.timerSponge.disable", "TRUE"},
+    {"isolation.tools.absMouseCommand.disable", "TRUE"},
+    {"isolation.tools.absMouseStatus.disable", "TRUE"},
+    {"isolation.tools.absMouseData.disable", "TRUE"},
+    {"isolation.tools.PatchSMBIOS.disable", "TRUE"},
+    {"isolation.tools.rsvd2.disable", "TRUE"},
+    {"isolation.tools.rsvd1.disable", "TRUE"},
+    {"isolation.tools.getPtrLocation.disable", "TRUE"},
+    {"isolation.tools.setPtrLocation.disable", "TRUE"},
+    {"isolation.tools.setVersion.disable", "TRUE"},
+    {"isolation.tools.getVersion.disable", "TRUE"},
+    {"monitor_control.disable_directexec", "TRUE"},
+    {"monitor_control.disable_chksimd", "TRUE"},
+    {"monitor_control.disable_ntreloc", "TRUE"},
+    {"monitor_control.disable_selfmod", "TRUE"},
+    {"monitor_control.disable_reloc", "TRUE"},
+    {"monitor_control.disable_btinout", "TRUE"},
+    {"monitor_control.disable_btmemspace", "TRUE"},
+    {"monitor_control.disable_btpriv", "TRUE"},
+    {"monitor_control.disable_btseg", "TRUE"},
+    {"monitor_control.enable_fullcpuid", "TRUE"},
+    // ponytail: static CPU spoof from the reference .vmx (Intel i5-7500). Replace the
+    // brand leaves if the VM must report another model.
+    {"cpuid.1.ecx", "0---:----:----:----:----:----:----:----"},
+    {"cpuid.80000002.eax", "0110:0101:0111:0100:0110:1110:0100:1001"},
+    {"cpuid.80000002.ebx", "0010:1001:0101:0010:0010:1000:0110:1100"},
+    {"cpuid.80000002.ecx", "0111:0010:0110:1111:0100:0011:0010:0000"},
+    {"cpuid.80000002.edx", "0100:1101:0101:0100:0010:1000:0110:0101"},
+    {"cpuid.80000003.eax", "0011:0101:0110:1001:0010:0000:0010:1001"},
+    {"cpuid.80000003.ebx", "0011:0000:0011:0101:0011:0111:0010:1101"},
+    {"cpuid.80000003.ecx", "0101:0000:0100:0011:0010:0000:0011:0000"},
+    {"cpuid.80000003.edx", "0010:0000:0100:0000:0010:0000:0101:0101"},
+    {"cpuid.80000004.eax", "0011:0000:0011:0100:0010:1110:0011:0011"},
+    {"cpuid.80000004.ebx", "0000:0000:0111:1010:0100:1000:0100:0111"},
+    {"cpuid.80000004.ecx", "0000:0000:0000:0000:0000:0000:0000:0000"},
+    {"cpuid.80000004.edx", "0000:0000:0000:0000:0000:0000:0000:0000"},
+    {"smbios.reflectHost", "FALSE"},
+    {"SMBIOS.noOEMStrings", "FALSE"},
+    {"SMBIOS.addHostVendor", "FALSE"},
+    {"serialNumber.reflectHost", "FALSE"},
+    {"board-id.reflectHost", "FALSE"},
+    {"hw.model.reflectHost", "FALSE"},
+    {"sched.mem.pshare.enable", "FALSE"},
+};
 
-    std::string text = read_text_file(vmx_path);    const bool crlf = text.find("\r\n") != std::string::npos;
-    const std::string eol = crlf ? "\r\n" : "\n";
+constexpr std::string_view kHardeningMarker = "# vmspoof hardening";
 
+std::vector<std::string> split_vmx(std::string_view text) {
     std::vector<std::string> lines;
-    {
-        size_t start = 0;
-        while (start <= text.size()) {
-            size_t end = text.find('\n', start);
-            std::string line = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            lines.push_back(line);
-            if (end == std::string::npos) break;
-            start = end + 1;
-        }
+    size_t start = 0;
+    while (start <= text.size()) {
+        size_t end = text.find('\n', start);
+        std::string line(text.substr(start, end == std::string_view::npos ? std::string_view::npos : end - start));
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(line);
+        if (end == std::string_view::npos) break;
+        start = end + 1;
     }
     if (!lines.empty() && lines.back().empty()) lines.pop_back();
+    return lines;
+}
 
-    const std::string value = to_utf8(rom_path.filename());
-    const std::string new_line = "efi64.filename = \"" + value + "\"";
-    bool found = false;
-    for (auto& line : lines) {
-        size_t eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        if (iequals(trim(std::string_view(line).substr(0, eq)), "efi64.filename")) {
-            line = new_line;
-            found = true;
-        }
-    }
-    if (!found) lines.push_back(new_line);
-
+std::string join_vmx(const std::vector<std::string>& lines, bool crlf) {
+    const std::string eol = crlf ? "\r\n" : "\n";
     std::string out;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        out += lines[i];
-        if (i + 1 < lines.size() || crlf) out += eol;
-    }
-    if (!out.empty() && out.back() != '\n') out += eol;
+    for (const auto& line : lines) out += line + eol;
+    return out;
+}
 
-    if (dry_run) {
-        log_line(log, "VMX (dry-run): " + to_utf8(vmx_path) + " -> " + new_line +
-                          "; se copiaría " + to_utf8(rom_path.filename()));
-        return;
-    }
+bool vmx_key_is(std::string_view line, std::string_view key) {
+    const size_t eq = line.find('=');
+    return eq != std::string_view::npos && iequals(trim(line.substr(0, eq)), key);
+}
 
-    const fs::path rom_dst = vmx_path.parent_path() / rom_path.filename();
-    if (!fs::equivalent(rom_path, rom_dst, ec)) {
-        std::error_code ec2;
-        if (fs::exists(rom_dst, ec2)) {
-            const fs::path old_backup = rom_dst.string() + ".bak-" + now_stamp();
-            if (!CopyFileW(rom_dst.c_str(), old_backup.c_str(), FALSE))
-                fail("VMX: no se pudo respaldar el ROM anterior " + to_utf8(rom_dst));
-            log_line(log, "Backup ROM anterior: " + to_utf8(old_backup));
-        }
-        fs::copy_file(rom_path, rom_dst, fs::copy_options::overwrite_existing, ec2);
-        if (ec2) fail("VMX: no se pudo copiar el ROM a " + to_utf8(rom_dst) + ": " + ec2.message());
-    }
+void write_vmx(const fs::path& vmx_path, const std::string& text, const Log& log, std::string_view what) {
     const fs::path backup = vmx_path.string() + ".bak-" + now_stamp();
     if (!CopyFileW(vmx_path.c_str(), backup.c_str(), FALSE))
         fail("VMX: no se pudo crear el backup " + to_utf8(backup));
-    std::vector<uint8_t> bytes(out.begin(), out.end());
+    std::vector<uint8_t> bytes(text.begin(), text.end());
     write_file_atomic(vmx_path, bytes, true);
-    log_line(log, "VMX actualizado: " + to_utf8(vmx_path) + " (" + new_line + ")");
-    log_line(log, "ROM copiado a " + to_utf8(rom_dst));
+    log_line(log, "VMX " + std::string(what) + ": " + to_utf8(vmx_path));
+}
+
+void configure_vmx(const fs::path& vmx_path, bool dry_run, const Log& log) {
+    std::error_code ec;
+    if (!fs::exists(vmx_path, ec)) fail("VMX: no existe " + to_utf8(vmx_path));
+
+    const std::string text = read_text_file(vmx_path);
+    const bool crlf = text.find("\r\n") != std::string::npos;
+    std::vector<std::string> lines = split_vmx(text);
+
+    size_t changed = 0;
+    lines.erase(std::remove_if(lines.begin(), lines.end(),
+                               [&](const std::string& line) {
+                                   if (!vmx_key_is(line, "efi64.filename")) return false;
+                                   ++changed;
+                                   return true;
+                               }),
+                lines.end());
+
+    size_t added = 0;
+    for (const auto& [key, value] : kHardening) {
+        const std::string new_line = std::string(key) + " = \"" + std::string(value) + "\"";
+        bool found = false;
+        for (auto& line : lines) {
+            if (!vmx_key_is(line, key)) continue;
+            found = true;
+            if (line != new_line) {
+                line = new_line;
+                ++changed;
+            }
+            break;
+        }
+        if (!found) {
+            lines.push_back(new_line);
+            ++added;
+        }
+    }
+
+    bool marked = false;
+    for (const auto& line : lines)
+        if (trim(line) == kHardeningMarker) marked = true;
+    if (!marked && (changed != 0 || added != 0)) lines.push_back(std::string(kHardeningMarker));
+
+    if (dry_run) {
+        log_line(log, "VMX (dry-run): " + to_utf8(vmx_path) + ": " + std::to_string(added) +
+                          " ajustes nuevos, " + std::to_string(changed) + " cambiados");
+        return;
+    }
+    write_vmx(vmx_path, join_vmx(lines, crlf), log, "hardening aplicado (" + std::to_string(added) +
+                                                       " nuevos, " + std::to_string(changed) + " cambiados)");
 }
 
 void save_original_stash(const fs::path& source, const fs::path& target,
@@ -760,48 +861,42 @@ fs::path find_original_file(const fs::path& explicit_path, const fs::path& targe
 void unconfigure_vmx(const fs::path& vmx_path, const Log& log) {
     std::error_code ec;
     if (!fs::exists(vmx_path, ec)) fail("VMX: no existe " + to_utf8(vmx_path));
-    std::string text = read_text_file(vmx_path);
+    const std::string text = read_text_file(vmx_path);
     const bool crlf = text.find("\r\n") != std::string::npos;
-    const std::string eol = crlf ? "\r\n" : "\n";
-    std::vector<std::string> lines;
-    size_t start = 0;
-    while (start <= text.size()) {
-        size_t end = text.find('\n', start);
-        std::string line = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        lines.push_back(line);
-        if (end == std::string::npos) break;
-        start = end + 1;
-    }
-    if (!lines.empty() && lines.back().empty()) lines.pop_back();
+    std::vector<std::string> lines = split_vmx(text);
 
-    bool changed = false;
-    std::vector<std::string> kept;
-    for (auto& line : lines) {
-        const size_t eq = line.find('=');
-        if (eq != std::string::npos &&
-            iequals(trim(std::string_view(line).substr(0, eq)), "efi64.filename")) {
-            changed = true;
-            continue;
-        }
-        kept.push_back(line);
-    }
-    if (!changed) {
-        log_line(log, "VMX: no tenía efi64.filename; no se modificó.");
+    bool marked = false;
+    for (const auto& line : lines)
+        if (trim(line) == kHardeningMarker) marked = true;
+
+    size_t removed = 0;
+    lines.erase(std::remove_if(lines.begin(), lines.end(),
+                               [&](const std::string& line) {
+                                   if (trim(line) == kHardeningMarker) {
+                                       ++removed;
+                                       return true;
+                                   }
+                                   if (vmx_key_is(line, "efi64.filename")) {
+                                       ++removed;
+                                       return true;
+                                   }
+                                   if (!marked) return false;
+                                   for (const auto& [key, value] : kHardening) {
+                                       (void)value;
+                                       if (vmx_key_is(line, key)) {
+                                           ++removed;
+                                           return true;
+                                       }
+                                   }
+                                   return false;
+                               }),
+                lines.end());
+    if (removed == 0) {
+        log_line(log, "VMX: no tenía hardening ni efi64.filename; no se modificó.");
         return;
     }
-    std::string out;
-    for (size_t i = 0; i < kept.size(); ++i) {
-        out += kept[i];
-        if (i + 1 < kept.size() || crlf) out += eol;
-    }
-    if (!out.empty() && out.back() != '\n') out += eol;
-    const fs::path backup = vmx_path.string() + ".bak-" + now_stamp();
-    if (!CopyFileW(vmx_path.c_str(), backup.c_str(), FALSE))
-        fail("VMX: no se pudo crear el backup " + to_utf8(backup));
-    std::vector<uint8_t> bytes(out.begin(), out.end());
-    write_file_atomic(vmx_path, bytes, true);
-    log_line(log, "VMX restaurado: " + to_utf8(vmx_path) + " (efi64.filename eliminado)");
+    write_vmx(vmx_path, join_vmx(lines, crlf), log,
+              "restaurado (" + std::to_string(removed) + " líneas eliminadas)");
 }
 
 void restore_file(const fs::path& source, const fs::path& target, const Log& log) {
@@ -1729,7 +1824,7 @@ Result patch_all(const Profile& profile, const Options& options, const Log& log)
 
         if (!options.vmx.empty()) {
             log_line(log, "== VMX ==");
-            configure_vmx(options.vmx, out_efi, options.dry_run, log);
+            configure_vmx(options.vmx, options.dry_run, log);
         }
 
         r = r2.report;
@@ -1902,7 +1997,7 @@ Result restore_vmware(const Profile& profile, const Options& options, const Log&
         if (options.dry_run) {
             if (!exe_ok) log_line(log, "dry-run: restauraría " + to_utf8(target_exe) + " desde " + to_utf8(src_exe));
             if (!efi_ok) log_line(log, "dry-run: restauraría " + to_utf8(target_efi) + " desde " + to_utf8(src_efi));
-            if (!options.vmx.empty()) log_line(log, "dry-run: quitaría efi64.filename de " + to_utf8(options.vmx));
+            if (!options.vmx.empty()) log_line(log, "dry-run: quitaría el hardening de " + to_utf8(options.vmx));
             return;
         }
 

@@ -262,15 +262,15 @@ const LangText kText[] = {
     {
         L"Restore the original vmware-vmx.exe and EFI64.ROM in the VMware installation.\n\n"
         L"- The current state is backed up before replacing.\n"
-        L"- efi64.filename is removed from the .vmx if you picked a VM.\n"
+        L"- Hardening is removed from the .vmx if you picked a VM.\n"
         L"- VMware must be closed.\n\nRestore?",
         L"Restaurar vmware-vmx.exe y EFI64.ROM originales en la instalación de VMware.\n\n"
         L"- Se respalda el estado actual antes de reemplazar.\n"
-        L"- Se elimina efi64.filename del .vmx si indicaste una VM.\n"
+        L"- Se elimina el hardening del .vmx si indicaste una VM.\n"
         L"- Requiere VMware cerrado.\n\n¿Restaurar?",
         L"将 VMware 安装目录中的 vmware-vmx.exe 和 EFI64.ROM 还原为原始版本。\n\n"
         L"- 替换前会备份当前状态。\n"
-        L"- 如果指定了虚拟机，将从 .vmx 中删除 efi64.filename。\n"
+        L"- 如果指定了虚拟机，将从 .vmx 中移除加固设置。\n"
         L"- 需要先关闭 VMware。\n\n是否还原？"},
     {L"Restore originals", L"Restaurar originales", L"还原原始文件"},
     {L"Select vmware-vmx.exe", L"Selecciona vmware-vmx.exe", L"选择 vmware-vmx.exe"},
@@ -323,9 +323,9 @@ const LangText kText[] = {
         L"Elige el EFI64.ROM original a parchear.",
         L"选择要修改的原始 EFI64.ROM。"},
     {
-        L"Pick a VM; the ROM is copied and efi64.filename set.",
-        L"Elige una VM; se copia el ROM y se ajusta efi64.filename.",
-        L"选择虚拟机；将复制 ROM 并设置 efi64.filename。"},
+        L"Pick a VM; its .vmx gets anti-detection hardening.",
+        L"Elige una VM; se aplica hardening anti-detección a su .vmx.",
+        L"选择虚拟机；将对其 .vmx 应用反检测加固。"},
     {
         L"Allow unknown builds and overwrite existing output.",
         L"Permite builds desconocidos y sobreescribe la salida existente.",
@@ -335,9 +335,9 @@ const LangText kText[] = {
         L"Valida y calcula sin escribir nada.",
         L"只校验和计算，不写入任何内容。"},
     {
-        L"Copy the patched ROM into a VM and configure efi64.filename.",
-        L"Copia el ROM parcheado a una VM y configura efi64.filename.",
-        L"将修改后的 ROM 复制到虚拟机并配置 efi64.filename。"},
+        L"Apply anti-detection hardening settings to the selected VM's .vmx.",
+        L"Aplica ajustes de hardening anti-detección al .vmx de la VM elegida.",
+        L"对所选虚拟机的 .vmx 应用反检测加固设置。"},
     {
         L"Use your own GPU and AHCI VID:DID values.",
         L"Usa tus propios valores VID:DID para GPU y AHCI.",

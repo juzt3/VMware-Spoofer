@@ -517,8 +517,17 @@ void test_install_restore(const fs::path& exe_path, const fs::path& efi_path, co
     o.in_efi = efi_path;
     o.out_dir = dir / "fakeout";
     o.install = true;
+    o.vmx = vmx;
     Result r = patch_all(full, o, quiet);
     CHECK(r.ok);
+    const auto vmx_bytes = read_file(vmx);
+    const std::string vmx_text(vmx_bytes.begin(), vmx_bytes.end());
+    CHECK(vmx_text.find("# vmspoof hardening") != std::string::npos);
+    CHECK(vmx_text.find("isolation.tools.getVersion.disable = \"TRUE\"") != std::string::npos);
+    CHECK(vmx_text.find("cpuid.1.ecx = \"0---:----:----:----:----:----:----:----\"") != std::string::npos);
+    CHECK(vmx_text.find("cpuid.80000002.eax = \"0110:0101:0111:0100:0110:1110:0100:1001\"") !=
+          std::string::npos);
+    CHECK(vmx_text.find("efi64.filename") == std::string::npos);
     CHECK(sha256_hex(read_file(bin / "vmware-vmx.exe")) ==
           "be9ad4329edb9442adc49eabd7bcbae55a193e9fb837f08ad1670973b56de5f3");
     CHECK(file_exists(bin / "vmspoof-original" / "vmware-vmx.exe"));
@@ -532,7 +541,7 @@ void test_install_restore(const fs::path& exe_path, const fs::path& efi_path, co
     CHECK(rr.ok);
     CHECK(sha256_hex(read_file(bin / "vmware-vmx.exe")) == full.exe_sha256);
     CHECK(sha256_hex(read_file(bin / "EFI64.ROM")) == full.efi_sha256);
-    CHECK(read_file(vmx).size() < 40); // efi64.filename eliminado
+    CHECK(read_file(vmx).size() < 40); // hardening y efi64.filename eliminados
 
     Result again = restore_vmware(full, ro, quiet);
     CHECK(again.ok); // ya son originales
