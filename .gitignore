@@ -1,6 +1,7 @@
 # build output
 /build/
 /dist/
+/release/
 /backup-*/
 /.kilo/
 

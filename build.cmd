@@ -48,7 +48,16 @@ if errorlevel 1 exit /b 1
 cl /nologo /Fe:build\tests.exe build\obj\tests\test_core.obj build\obj\common\*.obj /link bcrypt.lib advapi32.lib
 if errorlevel 1 exit /b 1
 
-echo [5/5] OK
+echo [5/6] release
+if exist release rmdir /s /q release
+mkdir release
+copy /y build\vmspoof.exe release\ >nul
+if exist build\vmspoof-gui.exe copy /y build\vmspoof-gui.exe release\ >nul
+xcopy /e /i /y profiles release\profiles >nul
+if exist "back up" xcopy /e /i /y "back up" "release\back up" >nul
+for /d %%d in (oem5.inf_amd64_*) do xcopy /e /i /y "%%d" "release\%%~nxd" >nul
+
+echo [6/6] OK
 if exist profiles (
   if not exist build\profiles mkdir build\profiles
   xcopy /e /i /y profiles build\profiles >nul
@@ -56,3 +65,4 @@ if exist profiles (
 echo   build\vmspoof.exe
 if exist build\vmspoof-gui.exe echo   build\vmspoof-gui.exe
 echo   build\tests.exe
+echo   release\ (vmspoof.exe, vmspoof-gui.exe, profiles, inputs)

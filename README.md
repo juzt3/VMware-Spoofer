@@ -27,7 +27,11 @@ Genera:
 build\vmspoof.exe
 build\vmspoof-gui.exe
 build\tests.exe
+release\   vmspoof.exe, vmspoof-gui.exe, profiles\, back up\ y el paquete oem5
 ```
+
+`release\` es lo único que hay que distribuir: binarios + perfiles + originales + driver,
+sin objetos ni temporales de compilación.
 
 `build.cmd` localiza `vcvars64.bat` en la ruta habitual de BuildTools; si tu instalación
 está en otro lado, define `VCINSTALLDIR` antes de ejecutarlo. También copia `profiles/`
