@@ -1092,7 +1092,8 @@ int gui_run(HINSTANCE instance) {
     const int wx = work.left + ((work.right - work.left) - ww) / 2;
     const int wy = work.top + ((work.bottom - work.top) - wh) / 2;
 
-    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"VM Spoof", WS_OVERLAPPEDWINDOW,
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"VM Spoof",
+                                WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                                 wx, wy, ww, wh, nullptr, nullptr, instance, &app);
     if (!hwnd) {
         Gdiplus::GdiplusShutdown(g_gdiplus);
