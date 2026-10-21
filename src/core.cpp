@@ -555,10 +555,10 @@ void gate_input(const std::vector<uint8_t>& data, uint64_t expected_size,
     std::string sha = sha256_hex(data);
     if (!force && sha != expected_sha) {
         fail(std::string(what) + ": SHA-256 no coincide\n  esperado: " + expected_sha +
-             "\n  obtenido: " + sha + "\nUsa --force solo si sabes que el build es compatible.");
+             "\n  obtenido: " + sha + "\nActiva Sobrescribir solo si sabes que el build es compatible.");
     }
     if (force && sha != expected_sha)
-        log_line(log, "AVISO: hash del original no coincide; --force activo");
+        log_line(log, "AVISO: hash del original no coincide; Sobrescribir activo");
     log_line(log, std::string(what) + ": " + std::to_string(data.size()) + " bytes, SHA-256 " + sha);
 }
 
@@ -754,7 +754,7 @@ fs::path find_original_file(const fs::path& explicit_path, const fs::path& targe
         }
     }
     fail("restore: no se encontró un " + target.filename().string() +
-         " original válido. Guarda una copia original, crea un backup, o indícalo con --in-exe/--in-efi.");
+         " original válido. Guarda una copia original, crea un backup, o selecciónalo en la GUI.");
 }
 
 void unconfigure_vmx(const fs::path& vmx_path, const Log& log) {
@@ -881,7 +881,7 @@ std::vector<uint8_t> unhex(std::string_view text, std::string_view what) {
 
 void write_file_atomic(const fs::path& out, const std::vector<uint8_t>& data, bool force) {
     std::error_code ec;
-    if (!force && fs::exists(out, ec)) fail("la salida ya existe: " + to_utf8(out) + " (usa --force)");
+    if (!force && fs::exists(out, ec))     fail("la salida ya existe: " + to_utf8(out) + " (activa Sobrescribir)");
     if (!out.parent_path().empty()) {
         fs::create_directories(out.parent_path(), ec);
         if (ec) fail("no se pudo crear la carpeta " + to_utf8(out.parent_path()) + ": " + ec.message());
@@ -905,7 +905,8 @@ void write_file_atomic(const fs::path& out, const std::vector<uint8_t>& data, bo
         std::error_code rm;
         fs::remove(tmp, rm);
         if (e == ERROR_FILE_EXISTS || e == ERROR_ALREADY_EXISTS)
-            fail("la salida ya existe: " + to_utf8(out) + " (usa --force)");
+fail("la salida ya existe: " + to_utf8(out) + " (activa Sobrescribir)");
+
         if (e == ERROR_ACCESS_DENIED)
             fail("permiso denegado al escribir " + to_utf8(out) + " (ejecuta como administrador)");
         fail("no se pudo mover " + to_utf8(tmp) + " a " + to_utf8(out) + " (error " + std::to_string(e) + ")");
@@ -1119,7 +1120,7 @@ Profile resolve_profile(const std::string& name_or_path) {
             start = end + 1;
         }
     }
-    // repo de desarrollo: build\vmspoof.exe + ..\profiles (tiene prioridad sobre la copia)
+    // repo de desarrollo: build\vmspoof-gui.exe + ..\profiles (tiene prioridad sobre la copia)
     dirs.push_back((exe_dir() / ".." / "profiles").lexically_normal());
     dirs.push_back(exe_dir() / "profiles");
     dirs.push_back(fs::current_path() / "profiles");
@@ -1187,7 +1188,7 @@ fs::path default_efi_path() { return vmware_bin_dir() / "EFI64.ROM"; }
 fs::path default_out_dir() {
     std::error_code ec;
     const fs::path exe = exe_dir();
-    // repo de desarrollo: build\vmspoof.exe + ..\profiles -> dist en la raíz
+    // repo de desarrollo: build\vmspoof-gui.exe + ..\profiles -> dist en la raíz
     if (fs::exists((exe / ".." / "profiles").lexically_normal(), ec))
         return (exe / ".." / "dist").lexically_normal();
     if (fs::exists(exe / "profiles", ec)) return exe / "dist";
@@ -1313,7 +1314,7 @@ fs::path find_driver_dir(const fs::path& explicit_dir) {
             if (is_driver_dir(entry.path())) return entry.path();
         }
     }
-    fail("driver: no se encontró el paquete (usa --in <carpeta> o VMSPOOF_DRIVER_DIR)");
+    fail("driver: no se encontró el paquete (define VMSPOOF_DRIVER_DIR)");
 }
 
 fs::path find_inf_file(const fs::path& dir) {
@@ -1493,7 +1494,7 @@ Result patch_vmx(const Profile& profile_in, const Options& options, const Log& l
             fail("vmware-vmx.exe: SHA-256 no coincide\n  esperado: " + profile.exe_sha256 +
                  "\n  obtenido: " + r.in_sha256 +
                  "\nParece un build distinto o un archivo ya parcheado con otro perfil."
-                 "\nUsa el original de 'back up' o --force si el build es compatible.");
+                 "\nUsa el original de 'back up' o activa Sobrescribir si el build es compatible.");
         if (!matches_orig && !matches_expected) {
             r.warnings.push_back("La entrada no es el original; se reutiliza como base ya parcheada.");
             log_line(log, "AVISO: entrada no original; se valida contra los valores conocidos del perfil.");
@@ -1581,7 +1582,7 @@ Result patch_efi(const Profile& profile_in, const Options& options, const Log& l
         if (!matches_orig && !already && !options.force && !(has_overrides && known_state))
             fail("EFI64.ROM: SHA-256 no coincide y el DXE no está en un estado conocido\n"
                  "  esperado: " + profile.efi_sha256 + "\n  obtenido: " + r.in_sha256 +
-                 "\nUsa el original de 'back up' o --force si el build es compatible.");
+                 "\nUsa el original de 'back up' o activa Sobrescribir si el build es compatible.");
 
         if (already) {
             log_line(log, "AVISO: el EFI ya tiene los IDs del perfil; se reutiliza sin recomprimir.");

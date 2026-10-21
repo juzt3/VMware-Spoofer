@@ -2,10 +2,9 @@
 
 Genera un `vmware-vmx.exe` y un `EFI64.ROM` parcheados y coherentes para spoofear
 GPU/SMBIOS/discos/USB/audio en VMware Workstation, con backups, validación por offset
-y verificación del resultado. Incluye CLI y GUI nativa Win32.
+y verificación del resultado. GUI nativa Win32.
 
-- **CLI**: `build\vmspoof.exe`
-- **GUI**: `build\vmspoof-gui.exe` (mismo core, sin lógica duplicada)
+- **GUI**: `build\vmspoof-gui.exe`
 - Sin dependencias en runtime: LZMA SDK vendorizado, SHA-256 con BCrypt, GUI con GDI+.
 
 ## Requisitos
@@ -24,10 +23,9 @@ build.cmd
 Genera:
 
 ```
-build\vmspoof.exe
 build\vmspoof-gui.exe
 build\tests.exe
-release\   vmspoof.exe, vmspoof-gui.exe, profiles\, back up\ y el paquete oem5
+release\   vmspoof-gui.exe, profiles\, back up\ y el paquete oem5
 ```
 
 `release\` es lo único que hay que distribuir: binarios + perfiles + originales + driver,
@@ -75,46 +73,10 @@ Verifica el hash original, respalda el estado actual y reemplaza de forma atómi
 Si indicaste un `.vmx`, elimina su línea `efi64.filename` (con backup del `.vmx`). No
 borra el NVRAM ni el ROM copiado en la carpeta de la VM.
 
-## CLI
+## Salidas
 
-```bat
-vmspoof patch-vmx --profile fullspoof --in "back up\vmware-vmx.exe" --out dist\vmware-vmx.patched.exe
-vmspoof patch-efi --profile fullspoof --in "back up\EFI64.ROM" --out dist\EFI64.patched
-vmspoof patch-all --profile fullspoof --vmx "C:\VMs\Win11\Win11.vmx"
-vmspoof patch-driver --profile fullspoof --out-dir dist\driver
-vmspoof patch-driver --profile fullspoof --in "oem5.inf_amd64_e19680a0353534c1" --svga-id 1002:1B80
-vmspoof verify --profile fullspoof --vmx-exe dist\vmware-vmx.patched.exe --efi dist\EFI64.patched
-vmspoof restore --profile fullspoof --in-exe "back up\vmware-vmx.exe" --in-efi "back up\EFI64.ROM"
-vmspoof manifest-diff --original "back up\vmware-vmx.exe" --patched vmware-vmx.exe --out dist\manifest.json --force
-```
-
-Flags:
-
-| Flag | Efecto |
-|---|---|
-| `--force` | Acepta un build desconocido y sobreescribe salidas. **No** salta la validación byte a byte de cada `orig` ni el hash esperado del perfil. |
-| `--dry-run` | Valida, descomprime, recomprime y calcula hashes, pero no escribe ni instala. |
-| `--install` | Instala en la carpeta de VMware con backup y reemplazo atómico. Requiere consola elevada y VMware cerrado. |
-| `--vmx <ruta>` | Copia el ROM a la carpeta de la VM y agrega/actualiza `efi64.filename`. |
-| `--json-report <ruta>` | Reporte con offsets, hashes, sección LZMA, diffs y warnings. |
-| `--svga-id VID:DID` | IDs hexadecimales personalizados para la GPU. |
-| `--ahci-id VID:DID` | IDs hexadecimales personalizados para el controlador AHCI. |
-
-`patch-all` usa por defecto el VMware instalado y `dist\` como salida. `--install`
-reemplaza `vmware-vmx.exe` y `EFI64.ROM` en `...\VMware Workstation\x64\`; el `.exe`
-es global y afecta a **todas** las VMs. La GUI siempre instala directamente y eleva
-permisos al arrancar; la CLI no eleva, así que `--install`/`restore` requieren una
-consola de administrador.
-
-### Salidas (CLI)
-
-```
-dist\vmware-vmx.patched.exe
-dist\EFI64.patched
-dist\vmspoof-report.json
-```
-
-Con el perfil `fullspoof` el `.exe` debe dar exactamente:
+La GUI parchea en `%TEMP%` e instala directamente. Con el perfil `fullspoof` el
+`vmware-vmx.exe` resultante debe dar exactamente:
 
 ```
 BE9AD4329EDB9442ADC49EABD7BCBAE55A193E9FB837F08AD1670973B56DE5F3
@@ -130,8 +92,8 @@ produce un stream idéntico bit a bit al de liblzma). Lo que importa, y se verif
   - `0x314355..0x314358` (SVGA `10DE:1001`)
 - Con `gpu-only`, solo cambian los 4 bytes de SVGA.
 
-`patch-driver` busca el paquete `oem5.inf_amd64_*` junto al ejecutable o al repo
-(también acepta `--in <carpeta>` o `VMSPOOF_DRIVER_DIR`). Genera la carpeta visible
+`Generar driver` busca el paquete `oem5.inf_amd64_*` junto al ejecutable o al repo
+(también acepta `VMSPOOF_DRIVER_DIR`). Genera la carpeta visible
 `dist\driver` con el INF y las DLLs ajustadas al VID/DID del perfil. El INF y los
 `vm3dgl*.dll` modificados ya no coinciden con `vm3d.cat`, así que el driver se instala
 igual que el paquete original modificado: con la comprobación de firma desactivada
@@ -146,7 +108,7 @@ En `profiles/`:
 - `vmware-16.2.4-gpu-only.json`: solo SVGA (`0x221590`, `0x2215db`). NO toca AHCI;
   el EFI solo parchea `VmwSvgaDxe`.
 
-`--profile` acepta el nombre (`fullspoof`, `gpu-only`) o una ruta `.json`. La búsqueda
+El perfil acepta el nombre (`fullspoof`, `gpu-only`) o una ruta `.json`. La búsqueda
 por nombre mira `%VMSPOOF_PROFILES%`, `<dir del exe>\profiles`, `<dir del exe>\..\profiles`
 (layout del repo), `.\profiles` y `..\profiles`.
 
@@ -162,11 +124,8 @@ reales del build de referencia; el hash `BE9AD4...` lo confirma.
 
 ## EFI64.ROM en la VM
 
-Por defecto VMware usa su `EFI64.ROM` global. Para usar el parcheado solo en una VM:
-
-```bat
-vmspoof patch-all --profile fullspoof --vmx "C:\VMs\Win11\Win11.vmx"
-```
+Por defecto VMware usa su `EFI64.ROM` global. Para usar el parcheado solo en una VM,
+usa `Configurar VM` en la GUI y elige el `.vmx`.
 
 Esto:
 
@@ -192,14 +151,7 @@ ide1:0.startConnected = "TRUE"
 
 ### IDs personalizados
 
-En la GUI activa `IDs personalizados` y edita `GPU` / `AHCI` (formato `VID:DID` en hex).
-En CLI:
-
-```bat
-vmspoof patch-all --profile fullspoof --in-exe "back up\vmware-vmx.exe" ^
-  --in-efi "back up\EFI64.ROM" --out-dir dist ^
-  --svga-id 1002:1B80 --ahci-id 1B4B:9215
-```
+Activa `IDs personalizados` y edita `GPU` / `AHCI` (formato `VID:DID` en hex).
 
 - SVGA actualiza los dos `cat=svga` del `.exe` y `VmwSvgaDxe`.
 - AHCI actualiza todas las entradas `cat=ahci` y `VmwAhciDxe`.
@@ -207,26 +159,26 @@ vmspoof patch-all --profile fullspoof --in-exe "back up\vmware-vmx.exe" ^
   chipset del perfil.
 - Con IDs personalizados se desactiva el hash golden esperado (no es conocido); la
   validación sigue siendo por offset y por coherencia EFI↔`.exe`. Para verificar, usa
-  los mismos `--svga-id`/`--ahci-id` con `verify`.
-- `gpu-only` no admite `--ahci-id` (el perfil no parchea AHCI).
+  los mismos IDs con `Verificar`.
+- `gpu-only` no admite IDs de AHCI (el perfil no parchea AHCI).
 
 ### Reinstalar / re-spoofear
 
 Si el archivo de entrada ya está parcheado:
 
 - Si coincide con el hash esperado del perfil, se reutiliza y se puede volver a
-  `--install` (no se modifica).
+  instalar (no se modifica).
 - Si el EFI ya tiene los IDs del perfil, se reutiliza sin recomprimir.
 - Si está parcheado con otro perfil o con IDs viejos, se valida contra los valores
   conocidos (original / `new` del perfil / IDs actuales) y se puede re-spoofear; si el
-  estado no es conocido, hace falta `--force`.
-- `--install` requiere GUI/consola elevada y VMware cerrado.
+  estado no es conocido, activa `Sobrescribir`.
+- Instalar requiere elevación y VMware cerrado.
 
 ## Seguridad
 
-- Sin `--install` no se modifica nada de `C:\Program Files (x86)\VMware\...`.
+- Sin `Dry-run`, la GUI siempre escribe en `C:\Program Files (x86)\VMware\...`.
 - Toda salida se escribe con `tmp` + `MoveFileExW` (atómico).
-- `--install` verifica que el destino no esté bloqueado (VM corriendo), crea
+- La instalación verifica que el destino no esté bloqueado (VM corriendo), crea
   `backup-YYYYMMDD-HHMMSS\` junto al archivo y luego reemplaza.
 - Si un solo `orig` no coincide, no se escribe ninguna salida.
 - El `.exe` parcheado es global; el ROM se puede aislar por VM con `efi64.filename`.
@@ -267,14 +219,14 @@ Si faltan los binarios, los tests golden se marcan `SKIP` y el resto se ejecuta.
 ## Troubleshooting
 
 - **"SHA-256 no coincide"**: tu VMware ya está parcheado o es otro build. Usa los
-  binarios originales como `--in-exe` / `--in-efi`; no uses `--force` salvo que sepas
-  que el build es compatible.
+  originales de `back up\`; no actives `Sobrescribir` salvo que sepas que el build es
+  compatible.
 - **"LZMA comprimido excede la capacidad"**: el build del firmware no es el esperado.
   No se relajan parámetros en silencio.
 - **No aparece el CD-ROM en UEFI**: pulsa `ESC` en el boot; el orden por defecto intenta
   NVMe/Network. Verifica `startConnected = "TRUE"`.
-- **"acceso denegado"**: la GUI ya pide elevación; si usas la CLI, abre la consola
-  como administrador. Cierra VMware (el chequeo de lock detecta VMs corriendo).
+- **"acceso denegado"**: la GUI ya pide elevación; acepta el UAC. Cierra VMware
+  (el chequeo de lock detecta VMs corriendo).
 - **La GUI no cambia de tamaño/fuentes raras**: es DPI-aware; si usas escalado mixto,
   mueve la ventana al monitor y Windows enviará `WM_DPICHANGED`.
 
@@ -293,10 +245,9 @@ Si faltan los binarios, los tests golden se marcan `SKIP` y el resto se ejecuta.
 
 ```
 src/core.cpp      perfiles (JSON), SHA-256, patch exe/EFI, verify, install, report
-src/main.cpp      CLI
 src/gui.cpp       GUI Win32 custom (GDI+, DPI-aware)
 third_party/lzma  LZMA SDK 26.04 (public domain)
 profiles/         perfiles versionados
 tests/            test_core.cpp + run-tests.cmd
-build.cmd         compila CLI, GUI y tests con MSVC
+build.cmd         compila GUI y tests con MSVC
 ```
