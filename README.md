@@ -25,11 +25,12 @@ Genera:
 ```
 build\vmspoof-gui.exe
 build\tests.exe
-release\   vmspoof-gui.exe, profiles\, back up\ y el paquete oem5
+release\   vmspoof-gui.exe, profiles\, back up\ y driver.pak (origen comprimido)
 ```
 
 `release\` es lo único que hay que distribuir: binarios + perfiles + originales + driver,
-sin objetos ni temporales de compilación.
+sin objetos ni temporales de compilación. El paquete original va comprimido en
+`driver.pak` y `patched driver\` solo se crea cuando el cliente pulsa `Generar driver`.
 
 `build.cmd` localiza `vcvars64.bat` en la ruta habitual de BuildTools; si tu instalación
 está en otro lado, define `VCINSTALLDIR` antes de ejecutarlo. También copia `profiles/`
@@ -47,9 +48,9 @@ Doble clic en `build\vmspoof-gui.exe` (pide elevación: instala directamente en 
   `vmware-vmx.exe` / `EFI64.ROM` en `...\VMware Workstation\x64\` con backup atómico.
 - Botones: `Instalar patch` (ambos), `Solo .exe`, `Solo EFI`, `Generar driver`,
   `Verificar`, `Restaurar` (originales), y `Configurar VM` para `efi64.filename`.
-- `Generar driver` copia el paquete `oem5.inf_amd64_...` a `dist\driver`, cambia el
-  hardware ID del INF y los VID/DID de `vm3dgl*.dll` a los del perfil/IDs personalizados,
-  y quita el `.PNF` cacheado. No instala el driver.
+- `Generar driver` extrae `driver.pak`, lo copia a `patched driver\`,
+  cambia el hardware ID del INF y los VID/DID de `vm3dgl*.dll` a los del perfil/IDs
+  personalizados, y quita el `.PNF` cacheado. No instala el driver.
 - Opciones: `Sobrescribir`, `Dry-run`, `Configurar VM`, `IDs personalizados`.
 - El log muestra offsets, hashes, tamaño comprimido y errores; la píldora de estado
   pasa a `OK` o `Error`.
@@ -92,9 +93,10 @@ produce un stream idéntico bit a bit al de liblzma). Lo que importa, y se verif
   - `0x314355..0x314358` (SVGA `10DE:1001`)
 - Con `gpu-only`, solo cambian los 4 bytes de SVGA.
 
-`Generar driver` busca el paquete `oem5.inf_amd64_*` junto al ejecutable o al repo
-(también acepta `VMSPOOF_DRIVER_DIR`). Genera la carpeta visible
-`dist\driver` con el INF y las DLLs ajustadas al VID/DID del perfil. El INF y los
+`Generar driver` busca `driver.pak` (o un `oem5.inf_amd64_*`) junto al ejecutable o al
+repo (también acepta `VMSPOOF_DRIVER_DIR`); el `.pak` se extrae en `%TEMP%` con el
+`tar.exe` de Windows y se borra al terminar. Genera junto al ejecutable la carpeta
+visible `patched driver\` con el INF y las DLLs ajustadas al VID/DID del perfil. El INF y los
 `vm3dgl*.dll` modificados ya no coinciden con `vm3d.cat`, así que el driver se instala
 igual que el paquete original modificado: con la comprobación de firma desactivada
 (modo de pruebas). Incluye un `LEEME.txt` con el comando `pnputil`.

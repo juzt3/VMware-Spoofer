@@ -1285,15 +1285,55 @@ bool is_driver_dir(const fs::path& dir) {
     return false;
 }
 
-fs::path find_driver_dir(const fs::path& explicit_dir) {
+struct DriverSource {
+    fs::path dir;
+    bool temporary = false;
+};
+
+bool run_hidden(const std::wstring& cmd) {
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi{};
+    std::wstring line = cmd;
+    if (!CreateProcessW(nullptr, line.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                        nullptr, &si, &pi))
+        return false;
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return code == 0;
+}
+
+fs::path extract_driver_pak(const fs::path& pak) {
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path() /
+        ("vmspoof-driver-" + std::to_string(GetCurrentProcessId()) + "-" +
+         std::to_string(GetTickCount64()));
+    fs::create_directories(dir, ec);
+    if (ec) fail("driver: no se pudo crear " + to_utf8(dir) + ": " + ec.message());
+    // ponytail: tar.exe (bsdtar) viene con Windows 10 1803+; evita un lector ZIP propio.
+    const std::wstring cmd =
+        L"tar.exe -xf \"" + pak.wstring() + L"\" -C \"" + dir.wstring() + L"\"";
+    if (!run_hidden(cmd) || !is_driver_dir(dir)) {
+        fs::remove_all(dir, ec);
+        fail("driver: no se pudo extraer el paquete " + to_utf8(pak));
+    }
+    return dir;
+}
+
+DriverSource find_driver_dir(const fs::path& explicit_dir) {
     if (!explicit_dir.empty()) {
-        if (is_driver_dir(explicit_dir)) return explicit_dir;
+        if (is_driver_dir(explicit_dir)) return {explicit_dir, false};
         fail("driver: no es un paquete vm3d (falta vm3dmp.sys o .inf): " + to_utf8(explicit_dir));
     }
     if (const wchar_t* env = _wgetenv(L"VMSPOOF_DRIVER_DIR")) {
         if (*env) {
             const fs::path p(env);
-            if (is_driver_dir(p)) return p;
+            if (is_driver_dir(p)) return {p, false};
             fail("VMSPOOF_DRIVER_DIR no es un paquete vm3d: " + to_utf8(p));
         }
     }
@@ -1303,7 +1343,7 @@ fs::path find_driver_dir(const fs::path& explicit_dir) {
         const fs::path norm = base.lexically_normal();
         for (const char* name : {"oem5.inf_amd64_e19680a0353534c1", "driver"}) {
             const fs::path candidate = norm / name;
-            if (is_driver_dir(candidate)) return candidate;
+            if (is_driver_dir(candidate)) return {candidate, false};
         }
         std::error_code ec;
         for (const auto& entry : fs::directory_iterator(norm, ec)) {
@@ -1311,10 +1351,13 @@ fs::path find_driver_dir(const fs::path& explicit_dir) {
             if (!entry.is_directory()) continue;
             const std::string fn = entry.path().filename().string();
             if (fn.rfind("oem", 0) != 0 || fn.find(".inf_amd64_") == std::string::npos) continue;
-            if (is_driver_dir(entry.path())) return entry.path();
+            if (is_driver_dir(entry.path())) return {entry.path(), false};
         }
+        ec.clear();
+        const fs::path pak = norm / "driver.pak";
+        if (fs::is_regular_file(pak, ec)) return {extract_driver_pak(pak), true};
     }
-    fail("driver: no se encontró el paquete (define VMSPOOF_DRIVER_DIR)");
+    fail("driver: no se encontró el paquete (driver.pak o VMSPOOF_DRIVER_DIR)");
 }
 
 fs::path find_inf_file(const fs::path& dir) {
@@ -1716,10 +1759,19 @@ Result patch_driver(const Profile& profile_in, const Options& options, const Log
         const uint16_t vid = profile.svga.vid;
         const uint16_t did = profile.svga.did;
 
-        const fs::path src = find_driver_dir(options.in);
+        const DriverSource source = find_driver_dir(options.in);
+        struct Cleanup {
+            fs::path dir;
+            ~Cleanup() {
+                if (dir.empty()) return;
+                std::error_code ec;
+                fs::remove_all(dir, ec);
+            }
+        } cleanup{source.temporary ? source.dir : fs::path{}};
+        const fs::path src = source.dir;
         const fs::path inf = find_inf_file(src);
         const fs::path out_dir =
-            options.out_dir.empty() ? default_out_dir() / "driver" : options.out_dir;
+            options.out_dir.empty() ? exe_dir() / "patched driver" : options.out_dir;
 
         const auto inf_bytes = read_file(inf);
         std::string text(inf_bytes.begin(), inf_bytes.end());

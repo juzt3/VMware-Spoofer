@@ -45,7 +45,10 @@ mkdir release
 copy /y build\vmspoof-gui.exe release\ >nul
 xcopy /e /i /y profiles release\profiles >nul
 if exist "back up" xcopy /e /i /y "back up" "release\back up" >nul
-for /d %%d in (oem5.inf_amd64_*) do xcopy /e /i /y "%%d" "release\%%~nxd" >nul
+for /d %%d in (oem5.inf_amd64_*) do (
+  tar --format=zip -cf "release\driver.pak" -C "%%d" .
+  if errorlevel 1 exit /b 1
+)
 
 if exist profiles (
   if not exist build\profiles mkdir build\profiles

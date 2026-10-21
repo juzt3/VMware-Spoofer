@@ -728,7 +728,6 @@ void start_job(App& a, Job job) {
         what = T(Str::JobEfi);
         break;
     case Job::Driver:
-        o.out_dir = default_out_dir() / "driver";
         what = T(Str::JobDriver);
         break;
     case Job::Verify:
