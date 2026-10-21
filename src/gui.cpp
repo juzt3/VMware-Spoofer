@@ -77,11 +77,36 @@ enum class Action {
     ToggleForce,
     ToggleDry,
     ToggleVmx,
-    ToggleCustomIds
+    ToggleCustomIds,
+    LangEn,
+    LangEs,
+    LangZh
 };
 
 enum class Status { Idle, Running, Ok, Error };
 enum class Job { All, Exe, Efi, Driver, Verify, Restore };
+
+enum class Str {
+    FullTitle, FullSub, GpuTitle, GpuSub, CustomProfile, Version, Subtitle,
+    Ready, Running, OkStatus, ErrorStatus,
+    LblExe, LblEfi, LblVmx, Browse,
+    Overwrite, DryRun, ConfigureVm, CustomIds,
+    BtnInstall, BtnExeOnly, BtnEfiOnly, BtnDriver, BtnVerify, BtnRestore, LogTitle,
+    ErrMissingVmx, ErrMissingVmxLog, ErrMissingProfile, ErrSelectProfile,
+    ErrInvalidProfile, ErrProfilePrefix, ErrInvalidGpu, ErrInvalidGpuLog,
+    ErrInvalidAhci, ErrInvalidAhciLog,
+    JobAll, JobExe, JobEfi, JobDriver, JobVerify, JobRestore, ProfileWord,
+    WarnOverwrite, DryRunLog, TargetPrefix,
+    Done, ErrPrefix, ErrUnknown,
+    RestoreConfirm, RestoreTitle,
+    DlgExeTitle, DlgEfiTitle, DlgVmxTitle, DlgProfileTitle,
+    FilterExe, FilterFirmware, FilterVmx, FilterProfiles,
+    InitialTarget, InitialReady, BusyMsg,
+    TipFull, TipGpu, TipCustom, TipBrowseExe, TipBrowseEfi, TipBrowseVmx,
+    TipOverwrite, TipDry, TipVmx, TipCustomIds,
+    TipInstall, TipExeOnly, TipEfiOnly, TipDriver, TipVerify, TipRestore, TipLang,
+    Count
+};
 
 struct Hit {
     RECT rect{};
@@ -107,6 +132,8 @@ struct App {
     HWND eGpuId = nullptr;
     HWND eAhciId = nullptr;
     HWND eLog = nullptr;
+    HWND tip = nullptr;
+    std::vector<UINT_PTR> tipIds;
 
     std::wstring exe, efi, vmx;
     std::wstring customProfile;
@@ -118,7 +145,7 @@ struct App {
     bool optCustomIds = false;
 
     Status status = Status::Idle;
-    std::wstring statusText = L"Listo";
+    Str statusStr = Str::Ready;
     bool running = false;
     std::thread worker;
 
@@ -141,8 +168,229 @@ struct App {
 App* g_app = nullptr;
 ULONG_PTR g_gdiplus = 0;
 
+int g_lang = 0; // 0 EN, 1 ES, 2 ZH
+
+constexpr wchar_t kRegKey[] = L"Software\\VM Spoof";
+
+int load_lang() {
+    DWORD v = 0, n = sizeof(v);
+    if (RegGetValueW(HKEY_CURRENT_USER, kRegKey, L"Lang", RRF_RT_REG_DWORD, nullptr, &v, &n) !=
+            ERROR_SUCCESS ||
+        v > 2)
+        return 0;
+    return int(v);
+}
+
+void save_lang(int lang) {
+    RegSetKeyValueW(HKEY_CURRENT_USER, kRegKey, L"Lang", REG_DWORD, &lang, sizeof(lang));
+}
+
+struct LangText {
+    const wchar_t* en;
+    const wchar_t* es;
+    const wchar_t* zh;
+};
+
+const LangText kText[] = {
+    {L"Full spoof", L"Full spoof", L"完全伪装"},
+    {L"GPU, AHCI, USB, audio", L"GPU, AHCI, USB, audio", L"GPU、AHCI、USB、音频"},
+    {L"GPU only", L"Solo GPU", L"仅 GPU"},
+    {L"SVGA only; leaves AHCI alone", L"Solo SVGA; no toca AHCI", L"仅 SVGA；不改动 AHCI"},
+    {L"Custom profile…", L"Perfil personalizado…", L"自定义配置…"},
+    {L"v1.0 · Native C++", L"v1.0 · C++ nativo", L"v1.0 · 原生 C++"},
+    {
+        L"Builds matching vmware-vmx.exe and EFI64.ROM files, with backups and verification.",
+        L"Genera un vmware-vmx.exe y un EFI64.ROM coherentes, con backups y verificación.",
+        L"生成匹配的 vmware-vmx.exe 与 EFI64.ROM，并带备份与校验。"},
+    {L"Ready", L"Listo", L"就绪"},
+    {L"Running…", L"Ejecutando…", L"正在运行…"},
+    {L"OK", L"OK", L"完成"},
+    {L"Error", L"Error", L"错误"},
+    {L"Original vmware-vmx.exe", L"vmware-vmx.exe original", L"原始 vmware-vmx.exe"},
+    {L"Original EFI64.ROM", L"EFI64.ROM original", L"原始 EFI64.ROM"},
+    {L"VM .vmx (optional)", L"VM .vmx (opcional)", L"VM .vmx（可选）"},
+    {L"Browse…", L"Examinar…", L"浏览…"},
+    {L"Overwrite", L"Sobrescribir", L"覆盖"},
+    {L"Dry-run", L"Dry-run", L"试运行"},
+    {L"Configure VM", L"Configurar VM", L"配置 VM"},
+    {L"Custom IDs", L"IDs personalizados", L"自定义 ID"},
+    {L"Install patch", L"Instalar patch", L"安装补丁"},
+    {L".exe only", L"Solo .exe", L"仅 .exe"},
+    {L"EFI only", L"Solo EFI", L"仅 EFI"},
+    {L"Generate driver", L"Generar driver", L"生成驱动"},
+    {L"Verify", L"Verificar", L"校验"},
+    {L"Restore", L"Restaurar", L"还原"},
+    {L"Log", L"Registro", L"日志"},
+    {L"Missing .vmx", L"Falta el .vmx", L"缺少 .vmx"},
+    {
+        L"Error: 'Configure VM' is on but no .vmx was given",
+        L"Error: activaste 'Configurar VM' pero no indicaste el .vmx",
+        L"错误：已启用“配置 VM”，但未指定 .vmx"},
+    {L"Missing profile", L"Falta el perfil", L"缺少配置文件"},
+    {L"Error: select a profile", L"Error: selecciona un perfil", L"错误：请选择一个配置文件"},
+    {L"Invalid profile", L"Perfil inválido", L"配置文件无效"},
+    {L"Profile error: ", L"Error de perfil: ", L"配置文件错误："},
+    {L"Invalid GPU ID", L"GPU ID inválido", L"GPU ID 无效"},
+    {
+        L"Error: invalid GPU VID:DID. Use hex, e.g. 10DE:1001.",
+        L"Error: GPU VID:DID inválido. Usa hexadecimal, p.ej. 10DE:1001.",
+        L"错误：GPU VID:DID 无效。请使用十六进制，例如 10DE:1001。"},
+    {L"Invalid AHCI ID", L"AHCI ID inválido", L"AHCI ID 无效"},
+    {
+        L"Error: invalid AHCI VID:DID. Use hex, e.g. 8086:A114.",
+        L"Error: AHCI VID:DID inválido. Usa hexadecimal, p.ej. 8086:A114.",
+        L"错误：AHCI VID:DID 无效。请使用十六进制，例如 8086:A114。"},
+    {L"Install patch (exe + EFI)", L"Instalar patch (exe + EFI)", L"安装补丁（exe + EFI）"},
+    {L"Install vmware-vmx.exe", L"Instalar vmware-vmx.exe", L"安装 vmware-vmx.exe"},
+    {L"Install EFI64.ROM", L"Instalar EFI64.ROM", L"安装 EFI64.ROM"},
+    {L"Generate driver", L"Generar driver", L"生成驱动"},
+    {L"Verify installation", L"Verificar instalación", L"校验安装"},
+    {L"Restore originals", L"Restaurar originales", L"还原原始文件"},
+    {L"profile", L"perfil", L"配置"},
+    {
+        L"WARNING: VMware files will be replaced for all VMs.",
+        L"AVISO: se reemplazan los archivos de VMware y afecta a todas las VMs.",
+        L"警告：将替换 VMware 文件，影响所有虚拟机。"},
+    {
+        L"Dry-run: nothing will be written.",
+        L"Modo simulación: no se escribirá nada.",
+        L"试运行：不会写入任何内容。"},
+    {L"Target: ", L"Objetivo: ", L"目标："},
+    {L"Operation completed.", L"Operación completada.", L"操作完成。"},
+    {L"Error: ", L"Error: ", L"错误："},
+    {L"unknown error", L"error desconocido", L"未知错误"},
+    {
+        L"Restore the original vmware-vmx.exe and EFI64.ROM in the VMware installation.\n\n"
+        L"- The current state is backed up before replacing.\n"
+        L"- efi64.filename is removed from the .vmx if you picked a VM.\n"
+        L"- VMware must be closed.\n\nRestore?",
+        L"Restaurar vmware-vmx.exe y EFI64.ROM originales en la instalación de VMware.\n\n"
+        L"- Se respalda el estado actual antes de reemplazar.\n"
+        L"- Se elimina efi64.filename del .vmx si indicaste una VM.\n"
+        L"- Requiere VMware cerrado.\n\n¿Restaurar?",
+        L"将 VMware 安装目录中的 vmware-vmx.exe 和 EFI64.ROM 还原为原始版本。\n\n"
+        L"- 替换前会备份当前状态。\n"
+        L"- 如果指定了虚拟机，将从 .vmx 中删除 efi64.filename。\n"
+        L"- 需要先关闭 VMware。\n\n是否还原？"},
+    {L"Restore originals", L"Restaurar originales", L"还原原始文件"},
+    {L"Select vmware-vmx.exe", L"Selecciona vmware-vmx.exe", L"选择 vmware-vmx.exe"},
+    {L"Select EFI64.ROM", L"Selecciona EFI64.ROM", L"选择 EFI64.ROM"},
+    {L"Select the VM (.vmx)", L"Selecciona la VM (.vmx)", L"选择虚拟机（.vmx）"},
+    {L"Select a JSON profile", L"Selecciona un perfil JSON", L"选择 JSON 配置文件"},
+    {
+        L"Executables (*.exe)\0*.exe\0All files (*.*)\0*.*\0\0",
+        L"Ejecutables (*.exe)\0*.exe\0Todos (*.*)\0*.*\0\0",
+        L"可执行文件 (*.exe)\0*.exe\0所有文件 (*.*)\0*.*\0\0"},
+    {
+        L"Firmware (*.ROM;*.rom)\0*.ROM;*.rom\0All files (*.*)\0*.*\0\0",
+        L"Firmware (*.ROM;*.rom)\0*.ROM;*.rom\0Todos (*.*)\0*.*\0\0",
+        L"固件 (*.ROM;*.rom)\0*.ROM;*.rom\0所有文件 (*.*)\0*.*\0\0"},
+    {
+        L"VMware (*.vmx)\0*.vmx\0All files (*.*)\0*.*\0\0",
+        L"VMware (*.vmx)\0*.vmx\0Todos (*.*)\0*.*\0\0",
+        L"VMware (*.vmx)\0*.vmx\0所有文件 (*.*)\0*.*\0\0"},
+    {
+        L"Profiles (*.json)\0*.json\0All files (*.*)\0*.*\0\0",
+        L"Perfiles (*.json)\0*.json\0Todos (*.*)\0*.*\0\0",
+        L"配置文件 (*.json)\0*.json\0所有文件 (*.*)\0*.*\0\0"},
+    {L"Target: ", L"Destino: ", L"目标："},
+    {
+        L"Ready. Pick a profile and press Install patch.",
+        L"Listo. Selecciona perfil y pulsa Instalar patch.",
+        L"就绪。选择配置后点击“安装补丁”。"},
+    {
+        L"An operation is running. Wait for it to finish.",
+        L"Hay una operación en curso. Espera a que termine.",
+        L"操作正在进行中，请等待完成。"},
+    {
+        L"Patches GPU, AHCI, USB and audio IDs across the whole install.",
+        L"Parchea los IDs de GPU, AHCI, USB y audio en toda la instalación.",
+        L"在整个安装中修改 GPU、AHCI、USB 和音频 ID。"},
+    {
+        L"Patches the SVGA device only; AHCI is left untouched.",
+        L"Parchea solo el dispositivo SVGA; no toca AHCI.",
+        L"仅修改 SVGA 设备，不改动 AHCI。"},
+    {
+        L"Load a custom JSON profile instead.",
+        L"Carga un perfil JSON personalizado.",
+        L"改为加载自定义 JSON 配置。"},
+    {
+        L"Pick the original vmware-vmx.exe to patch.",
+        L"Elige el vmware-vmx.exe original a parchear.",
+        L"选择要修改的原始 vmware-vmx.exe。"},
+    {
+        L"Pick the original EFI64.ROM to patch.",
+        L"Elige el EFI64.ROM original a parchear.",
+        L"选择要修改的原始 EFI64.ROM。"},
+    {
+        L"Pick a VM; the ROM is copied and efi64.filename set.",
+        L"Elige una VM; se copia el ROM y se ajusta efi64.filename.",
+        L"选择虚拟机；将复制 ROM 并设置 efi64.filename。"},
+    {
+        L"Allow unknown builds and overwrite existing output.",
+        L"Permite builds desconocidos y sobreescribe la salida existente.",
+        L"允许未知版本并覆盖现有输出。"},
+    {
+        L"Validate and compute without writing anything.",
+        L"Valida y calcula sin escribir nada.",
+        L"只校验和计算，不写入任何内容。"},
+    {
+        L"Copy the patched ROM into a VM and configure efi64.filename.",
+        L"Copia el ROM parcheado a una VM y configura efi64.filename.",
+        L"将修改后的 ROM 复制到虚拟机并配置 efi64.filename。"},
+    {
+        L"Use your own GPU and AHCI VID:DID values.",
+        L"Usa tus propios valores VID:DID para GPU y AHCI.",
+        L"使用自定义的 GPU 和 AHCI VID:DID。"},
+    {
+        L"Patch and install vmware-vmx.exe plus EFI64.ROM.",
+        L"Parchea e instala vmware-vmx.exe y EFI64.ROM.",
+        L"修改并安装 vmware-vmx.exe 和 EFI64.ROM。"},
+    {
+        L"Install only the patched vmware-vmx.exe.",
+        L"Instala solo el vmware-vmx.exe parcheado.",
+        L"仅安装修改后的 vmware-vmx.exe。"},
+    {
+        L"Install only the patched EFI64.ROM.",
+        L"Instala solo el EFI64.ROM parcheado.",
+        L"仅安装修改后的 EFI64.ROM。"},
+    {
+        L"Generate the patched driver files.",
+        L"Genera los archivos del driver parcheado.",
+        L"生成修改后的驱动文件。"},
+    {
+        L"Check the installed files against the profile.",
+        L"Comprueba los archivos instalados contra el perfil.",
+        L"按配置校验已安装的文件。"},
+    {
+        L"Restore the original files from backup.",
+        L"Restaura los archivos originales desde el backup.",
+        L"从备份还原原始文件。"},
+    {L"Change language", L"Cambiar idioma", L"切换语言"},
+};
+static_assert(std::size(kText) == size_t(Str::Count));
+
+const wchar_t* T(Str s) {
+    const LangText& t = kText[int(s)];
+    return g_lang == 0 ? t.en : g_lang == 1 ? t.es : t.zh;
+}
+
+const wchar_t* TIn(int lang, Str s) {
+    const LangText& t = kText[int(s)];
+    return lang == 0 ? t.en : lang == 1 ? t.es : t.zh;
+}
+
+std::string to_utf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), nullptr, 0, nullptr, nullptr);
+    std::string out(size_t(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), out.data(), n, nullptr, nullptr);
+    return out;
+}
+
 void update_custom_enabled(App& a);
 bool parse_id(const std::wstring& text, uint16_t& vid, uint16_t& did);
+void recreate_fonts(App& a);
 
 std::wstring from_utf8(std::string_view s) {
     if (s.empty()) return {};
@@ -237,11 +485,13 @@ void create_fonts(App& a) {
     if (a.fSmall) DeleteObject(a.fSmall);
     if (a.fBold) DeleteObject(a.fBold);
     if (a.fMono) DeleteObject(a.fMono);
-    a.fTitle = make(19, FW_SEMIBOLD, L"Segoe UI Semibold");
-    a.fSub = make(10, FW_NORMAL, L"Segoe UI");
-    a.fBody = make(10, FW_NORMAL, L"Segoe UI");
-    a.fSmall = make(9, FW_NORMAL, L"Segoe UI");
-    a.fBold = make(10, FW_SEMIBOLD, L"Segoe UI Semibold");
+    const wchar_t* ui = g_lang == 2 ? L"Microsoft YaHei UI" : L"Segoe UI";
+    const wchar_t* uiSemibold = g_lang == 2 ? L"Microsoft YaHei UI" : L"Segoe UI Semibold";
+    a.fTitle = make(19, FW_SEMIBOLD, uiSemibold);
+    a.fSub = make(10, FW_NORMAL, ui);
+    a.fBody = make(10, FW_NORMAL, ui);
+    a.fSmall = make(9, FW_NORMAL, ui);
+    a.fBold = make(10, FW_SEMIBOLD, uiSemibold);
     a.fMono = make(9, FW_NORMAL, L"Consolas");
 }
 
@@ -301,6 +551,50 @@ void layout(App& a, int W, int H) {
 
 void add_hit(App& a, RECT r, Action action) { a.hits.push_back({r, action}); }
 
+Str tip_text(Action action) {
+    switch (action) {
+    case Action::ProfileFull: return Str::TipFull;
+    case Action::ProfileGpu: return Str::TipGpu;
+    case Action::CustomProfile: return Str::TipCustom;
+    case Action::BrowseExe: return Str::TipBrowseExe;
+    case Action::BrowseEfi: return Str::TipBrowseEfi;
+    case Action::BrowseVmx: return Str::TipBrowseVmx;
+    case Action::ToggleForce: return Str::TipOverwrite;
+    case Action::ToggleDry: return Str::TipDry;
+    case Action::ToggleVmx: return Str::TipVmx;
+    case Action::ToggleCustomIds: return Str::TipCustomIds;
+    case Action::Primary: return Str::TipInstall;
+    case Action::OnlyExe: return Str::TipExeOnly;
+    case Action::OnlyEfi: return Str::TipEfiOnly;
+    case Action::Driver: return Str::TipDriver;
+    case Action::Verify: return Str::TipVerify;
+    case Action::Restore: return Str::TipRestore;
+    case Action::LangEn:
+    case Action::LangEs:
+    case Action::LangZh: return Str::TipLang;
+    default: return Str::Count;
+    }
+}
+
+void add_tip(App& a, RECT r, Action action) {
+    const Str s = tip_text(action);
+    if (!a.tip || s == Str::Count) return;
+    const UINT_PTR id = UINT_PTR(action) + 1;
+    TOOLINFOW ti{};
+    ti.cbSize = sizeof(ti);
+    ti.uFlags = TTF_SUBCLASS;
+    ti.hwnd = a.hwnd;
+    ti.uId = id;
+    ti.rect = r;
+    ti.lpszText = const_cast<wchar_t*>(T(s));
+    if (std::find(a.tipIds.begin(), a.tipIds.end(), id) == a.tipIds.end()) {
+        if (SendMessageW(a.tip, TTM_ADDTOOLW, 0, LPARAM(&ti))) a.tipIds.push_back(id);
+    } else {
+        SendMessageW(a.tip, TTM_NEWTOOLRECTW, 0, LPARAM(&ti));
+        SendMessageW(a.tip, TTM_UPDATETIPTEXTW, 0, LPARAM(&ti));
+    }
+}
+
 bool hit_test(const App& a, POINT pt, Action& action) {
     for (auto it = a.hits.rbegin(); it != a.hits.rend(); ++it) {
         if (PtInRect(&it->rect, pt)) {
@@ -338,9 +632,9 @@ void append_log(HWND log, const std::wstring& text) {
     SendMessageW(log, EM_SCROLLCARET, 0, 0);
 }
 
-void set_status(App& a, Status s, const std::wstring& text) {
+void set_status(App& a, Status s, Str text) {
     a.status = s;
-    a.statusText = text;
+    a.statusStr = text;
     InvalidateRect(a.hwnd, nullptr, FALSE);
 }
 
@@ -360,13 +654,13 @@ void start_job(App& a, Job job) {
     a.vmx = get_text(a.eVmx);
 
     if (job != Job::Driver && a.optVmx && a.vmx.empty()) {
-        set_status(a, Status::Error, L"Falta el .vmx");
-        append_log(a.eLog, L"Error: activaste 'Configurar VM' pero no indicaste el .vmx");
+        set_status(a, Status::Error, Str::ErrMissingVmx);
+        append_log(a.eLog, T(Str::ErrMissingVmxLog));
         return;
     }
     if (a.profile < 0 && a.customProfile.empty()) {
-        set_status(a, Status::Error, L"Falta el perfil");
-        append_log(a.eLog, L"Error: selecciona un perfil");
+        set_status(a, Status::Error, Str::ErrMissingProfile);
+        append_log(a.eLog, T(Str::ErrSelectProfile));
         return;
     }
 
@@ -375,8 +669,8 @@ void start_job(App& a, Job job) {
         profile = a.profile < 0 ? load_profile(fs::path(a.customProfile))
                                 : resolve_profile(a.profile == 0 ? "fullspoof" : "gpu-only");
     } catch (const std::exception& e) {
-        set_status(a, Status::Error, L"Perfil inválido");
-        append_log(a.eLog, L"Error de perfil: " + from_utf8(e.what()));
+        set_status(a, Status::Error, Str::ErrInvalidProfile);
+        append_log(a.eLog, std::wstring(T(Str::ErrProfilePrefix)) + from_utf8(e.what()));
         return;
     }
 
@@ -397,8 +691,8 @@ void start_job(App& a, Job job) {
     if (a.optCustomIds && job != Job::Restore) {
         uint16_t vid = 0, did = 0;
         if (!parse_id(get_text(a.eGpuId), vid, did)) {
-            set_status(a, Status::Error, L"GPU ID inválido");
-            append_log(a.eLog, L"Error: GPU VID:DID inválido. Usa hexadecimal, p.ej. 10DE:1001.");
+            set_status(a, Status::Error, Str::ErrInvalidGpu);
+            append_log(a.eLog, T(Str::ErrInvalidGpuLog));
             return;
         }
         o.svga_id = std::make_pair(vid, did);
@@ -406,8 +700,8 @@ void start_job(App& a, Job job) {
             const std::wstring ahci = get_text(a.eAhciId);
             if (!ahci.empty()) {
                 if (!parse_id(ahci, vid, did)) {
-                    set_status(a, Status::Error, L"AHCI ID inválido");
-                    append_log(a.eLog, L"Error: AHCI VID:DID inválido. Usa hexadecimal, p.ej. 8086:A114.");
+                    set_status(a, Status::Error, Str::ErrInvalidAhci);
+                    append_log(a.eLog, T(Str::ErrInvalidAhciLog));
                     return;
                 }
                 o.ahci_id = std::make_pair(vid, did);
@@ -421,45 +715,47 @@ void start_job(App& a, Job job) {
         o.in = fs::path(a.exe);
         o.in_efi = fs::path(a.efi);
         o.out_dir = stage;
-        what = L"Instalar patch (exe + EFI)";
+        what = T(Str::JobAll);
         break;
     case Job::Exe:
         o.in = fs::path(a.exe.empty() ? default_exe_path().wstring() : a.exe);
         o.out = stage / "vmware-vmx.patched.exe";
-        what = L"Instalar vmware-vmx.exe";
+        what = T(Str::JobExe);
         break;
     case Job::Efi:
         o.in = fs::path(a.efi.empty() ? default_efi_path().wstring() : a.efi);
         o.out = stage / "EFI64.patched";
-        what = L"Instalar EFI64.ROM";
+        what = T(Str::JobEfi);
         break;
     case Job::Driver:
         o.out_dir = default_out_dir() / "driver";
-        what = L"Generar driver";
+        what = T(Str::JobDriver);
         break;
     case Job::Verify:
         o.in = default_exe_path();
         o.out = default_efi_path();
-        what = L"Verificar instalación";
+        what = T(Str::JobVerify);
         break;
     case Job::Restore:
         o.in = fs::path(a.exe);
         o.in_efi = fs::path(a.efi);
-        what = L"Restaurar originales";
+        what = T(Str::JobRestore);
         break;
     }
 
-    append_log(a.eLog, L"=== " + what + L" · perfil " + from_utf8(profile.name) + L" ===");
-    if (o.install && !a.optDry)
-        append_log(a.eLog, L"AVISO: se reemplazan los archivos de VMware y afecta a todas las VMs.");
-    if (a.optDry) append_log(a.eLog, L"Modo simulación: no se escribirá nada.");
-    if (job == Job::Restore) append_log(a.eLog, L"Objetivo: " + default_exe_path().wstring());
+    append_log(a.eLog, std::wstring(L"=== ") + what + L" · " + T(Str::ProfileWord) + L" " +
+                           from_utf8(profile.name) + L" ===");
+    if (o.install && !a.optDry) append_log(a.eLog, T(Str::WarnOverwrite));
+    if (a.optDry) append_log(a.eLog, T(Str::DryRunLog));
+    if (job == Job::Restore)
+        append_log(a.eLog, std::wstring(T(Str::TargetPrefix)) + default_exe_path().wstring());
 
-    set_status(a, Status::Running, L"Ejecutando…");
+    set_status(a, Status::Running, Str::Running);
     set_running_ui(a, true);
 
     const HWND hwnd = a.hwnd;
-    a.worker = std::thread([hwnd, profile, o, job] {
+    const int lang = g_lang;
+    a.worker = std::thread([hwnd, profile, o, job, lang] {
         const Log log = [hwnd](std::string_view s) {
             PostMessageW(hwnd, WM_APP_LOG, 0, LPARAM(new std::wstring(from_utf8(s))));
         };
@@ -478,10 +774,11 @@ void start_job(App& a, Job job) {
             r.error = e.what();
         } catch (...) {
             r.ok = false;
-            r.error = "error desconocido";
+            r.error = to_utf8(TIn(lang, Str::ErrUnknown));
         }
         std::wstring* msg = new std::wstring(
-            r.ok ? L"Operación completada." : (L"Error: " + from_utf8(r.error)));
+            r.ok ? TIn(lang, Str::Done)
+                 : std::wstring(TIn(lang, Str::ErrPrefix)) + from_utf8(r.error));
         PostMessageW(hwnd, WM_APP_DONE, r.ok ? 1 : 0, LPARAM(msg));
     });
 }
@@ -508,18 +805,15 @@ void browse(App& a, Action action) {
     std::wstring value;
     switch (action) {
     case Action::BrowseExe:
-        value = open_file(a.hwnd, L"Selecciona vmware-vmx.exe",
-                          L"Ejecutables (*.exe)\0*.exe\0Todos (*.*)\0*.*\0\0");
+        value = open_file(a.hwnd, T(Str::DlgExeTitle), T(Str::FilterExe));
         if (!value.empty()) SetWindowTextW(a.eExe, value.c_str());
         break;
     case Action::BrowseEfi:
-        value = open_file(a.hwnd, L"Selecciona EFI64.ROM",
-                          L"Firmware (*.ROM;*.rom)\0*.ROM;*.rom\0Todos (*.*)\0*.*\0\0");
+        value = open_file(a.hwnd, T(Str::DlgEfiTitle), T(Str::FilterFirmware));
         if (!value.empty()) SetWindowTextW(a.eEfi, value.c_str());
         break;
     case Action::BrowseVmx:
-        value = open_file(a.hwnd, L"Selecciona la VM (.vmx)",
-                          L"VMware (*.vmx)\0*.vmx\0Todos (*.*)\0*.*\0\0");
+        value = open_file(a.hwnd, T(Str::DlgVmxTitle), T(Str::FilterVmx));
         if (!value.empty()) {
             SetWindowTextW(a.eVmx, value.c_str());
             a.optVmx = true;
@@ -562,6 +856,14 @@ void update_custom_enabled(App& a) {
     EnableWindow(a.eAhciId, on && a.profile != 1);
 }
 
+void set_language(App& a, int lang) {
+    if (g_lang == lang) return;
+    g_lang = lang;
+    save_lang(lang);
+    recreate_fonts(a);
+    InvalidateRect(a.hwnd, nullptr, FALSE);
+}
+
 void handle_action(App& a, Action action) {
     switch (action) {
     case Action::Primary: start_job(a, Job::All); break;
@@ -570,13 +872,8 @@ void handle_action(App& a, Action action) {
     case Action::Driver: start_job(a, Job::Driver); break;
     case Action::Verify: start_job(a, Job::Verify); break;
     case Action::Restore: {
-        const int r = MessageBoxW(
-            a.hwnd,
-            L"Restaurar vmware-vmx.exe y EFI64.ROM originales en la instalación de VMware.\n\n"
-            L"- Se respalda el estado actual antes de reemplazar.\n"
-            L"- Se elimina efi64.filename del .vmx si indicaste una VM.\n"
-            L"- Requiere VMware cerrado.\n\n¿Restaurar?",
-            L"Restaurar originales", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
+        const int r = MessageBoxW(a.hwnd, T(Str::RestoreConfirm), T(Str::RestoreTitle),
+                                  MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2);
         if (r == IDYES) start_job(a, Job::Restore);
         break;
     }
@@ -593,14 +890,16 @@ void handle_action(App& a, Action action) {
         update_custom_enabled(a);
         break;
     case Action::CustomProfile: {
-        std::wstring p = open_file(a.hwnd, L"Selecciona un perfil JSON",
-                                   L"Perfiles (*.json)\0*.json\0Todos (*.*)\0*.*\0\0");
+        std::wstring p = open_file(a.hwnd, T(Str::DlgProfileTitle), T(Str::FilterProfiles));
         if (!p.empty()) {
             a.customProfile = p;
             a.profile = -1;
         }
         break;
     }
+    case Action::LangEn: set_language(a, 0); break;
+    case Action::LangEs: set_language(a, 1); break;
+    case Action::LangZh: set_language(a, 2); break;
     case Action::ToggleForce: a.optForce = !a.optForce; break;
     case Action::ToggleDry: a.optDry = !a.optDry; break;
     case Action::ToggleVmx:
@@ -633,7 +932,9 @@ void render(App& a, HDC dc, const RECT& client) {
         round_rect(g, r, a.S(radius), fill, border);
     };
     auto hit = [&](RECT r, Action action, bool enabled = true) {
-        if (enabled) add_hit(a, r, action);
+        if (!enabled) return;
+        add_hit(a, r, action);
+        add_tip(a, r, action);
     };
 
     const int W = client.right, H = client.bottom;
@@ -664,40 +965,53 @@ void render(App& a, HDC dc, const RECT& client) {
         txt(sub, rs, a.fSmall, cMuted, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
         hit(card, action, !a.running);
     };
-    profile_card(112, L"Full spoof", L"GPU, AHCI, USB, audio", Action::ProfileFull,
+    profile_card(112, T(Str::FullTitle), T(Str::FullSub), Action::ProfileFull,
                  a.profile == 0);
-    profile_card(184, L"GPU only", L"Solo SVGA; no toca AHCI", Action::ProfileGpu, a.profile == 1);
+    profile_card(184, T(Str::GpuTitle), T(Str::GpuSub), Action::ProfileGpu, a.profile == 1);
 
     RECT custom{a.S(16), a.S(262), a.S(204), a.S(288)};
     const bool customSel = a.profile < 0;
     rr(custom, 8, customSel ? cAccentDim : Color(0, 0, 0, 0), customSel ? cAccent : Color(0, 0, 0, 0));
-    txt(a.customProfile.empty() ? L"Perfil personalizado…" : fs::path(a.customProfile).filename().wstring(),
+    txt(a.customProfile.empty() ? T(Str::CustomProfile) : fs::path(a.customProfile).filename().wstring(),
         inset(custom, a.S(10), 0), a.fSmall, customSel ? cText : cAccent,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     hit(custom, Action::CustomProfile, !a.running);
 
+    const int langY = H - a.S(74);
+    auto lang_btn = [&](int i, const wchar_t* name, Action action) {
+        const int lw = a.S(54);
+        RECT r{a.S(16) + i * (lw + a.S(6)), langY, a.S(16) + i * (lw + a.S(6)) + lw, langY + a.S(24)};
+        const bool sel = g_lang == i;
+        rr(r, 7, sel ? cAccentDim : cCard, sel ? cAccent : cBorder);
+        txt(name, r, a.fSmall, sel ? cText : cMuted, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        hit(r, action, !a.running);
+    };
+    lang_btn(0, L"EN", Action::LangEn);
+    lang_btn(1, L"ES", Action::LangEs);
+    lang_btn(2, L"中文", Action::LangZh);
+
     RECT footer{a.S(18), H - a.S(38), a.S(204), H - a.S(18)};
-    txt(L"v1.0 · C++ nativo", footer, a.fSmall, cMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    txt(T(Str::Version), footer, a.fSmall, cMuted, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     // Cabecera
     RECT title{L.contentX, a.S(20), L.contentX + L.contentW, a.S(56)};
     txt(L"VMware VM Spoof", title, a.fTitle, cText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     RECT subtitle{L.contentX, a.S(52), L.contentX + L.contentW, a.S(76)};
-    txt(L"Genera un vmware-vmx.exe y un EFI64.ROM coherentes, con backups y verificación.",
-        subtitle, a.fSmall, cMuted, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
+    txt(T(Str::Subtitle), subtitle, a.fSmall, cMuted, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     // Estado
     {
         Color sc = a.status == Status::Ok ? cOk : a.status == Status::Error ? cErr
                  : a.status == Status::Running ? cAccent : cMuted;
+        const std::wstring statusText = T(a.statusStr);
         SIZE sz{};
         HGDIOBJ old = SelectObject(dc, a.fSmall);
-        GetTextExtentPoint32W(dc, a.statusText.c_str(), int(a.statusText.size()), &sz);
+        GetTextExtentPoint32W(dc, statusText.c_str(), int(statusText.size()), &sz);
         SelectObject(dc, old);
         const int pillW = sz.cx + a.S(30);
         RECT pill{client.right - a.S(24) - pillW, a.S(28), client.right - a.S(24), a.S(52)};
         rr(pill, 12, Color(38, sc.GetR(), sc.GetG(), sc.GetB()), Color(80, sc.GetR(), sc.GetG(), sc.GetB()));
-        txt(a.statusText, pill, a.fSmall, sc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        txt(statusText, pill, a.fSmall, sc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
     auto card = [&](RECT r, bool active) { rr(r, 10, cCard, active ? cAccent : cBorder); };
@@ -708,20 +1022,20 @@ void render(App& a, HDC dc, const RECT& client) {
     auto browse_btn = [&](RECT r, Action action) {
         rr(r, 7, cCard, cBorder);
         if (a.hot == action) rr(r, 7, mix(cCard, cAccent, 0.18), cAccent);
-        txt(L"Examinar…", r, a.fSmall, cText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        txt(T(Str::Browse), r, a.fSmall, cText, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         hit(r, action, !a.running);
     };
 
     card(L.exeCard, false);
-    label(L.exeCard, L"vmware-vmx.exe original");
+    label(L.exeCard, T(Str::LblExe));
     browse_btn(L.exeBrowse, Action::BrowseExe);
 
     card(L.efiCard, false);
-    label(L.efiCard, L"EFI64.ROM original");
+    label(L.efiCard, T(Str::LblEfi));
     browse_btn(L.efiBrowse, Action::BrowseEfi);
 
     card(L.vmxCard, a.optVmx);
-    label(L.vmxCard, L"VM .vmx (opcional)");
+    label(L.vmxCard, T(Str::LblVmx));
     browse_btn(L.vmxBrowse, Action::BrowseVmx);
 
     // Toggles
@@ -744,13 +1058,13 @@ void render(App& a, HDC dc, const RECT& client) {
     };
     const int oy = L.optionsY + a.S(12);
     int tx = L.contentX;
-    tx = toggle(tx, oy, a.optForce, L"Sobrescribir", Action::ToggleForce);
-    tx = toggle(tx, oy, a.optDry, L"Dry-run", Action::ToggleDry);
-    toggle(tx, oy, a.optVmx, L"Configurar VM", Action::ToggleVmx);
+    tx = toggle(tx, oy, a.optForce, T(Str::Overwrite), Action::ToggleForce);
+    tx = toggle(tx, oy, a.optDry, T(Str::DryRun), Action::ToggleDry);
+    toggle(tx, oy, a.optVmx, T(Str::ConfigureVm), Action::ToggleVmx);
 
     // IDs personalizados
     const int cy = L.customY + a.S(6);
-    toggle(L.contentX, cy, a.optCustomIds, L"IDs personalizados", Action::ToggleCustomIds);
+    toggle(L.contentX, cy, a.optCustomIds, T(Str::CustomIds), Action::ToggleCustomIds);
     auto field_box = [&](RECT edit) {
         RECT box = edit;
         InflateRect(&box, a.S(2), a.S(2));
@@ -793,18 +1107,18 @@ void render(App& a, HDC dc, const RECT& client) {
     int bx = L.contentX;
     auto advance = [&](int w) { RECT r{bx, by, bx + a.S(w), by + bh}; bx += a.S(w) + a.S(8); return r; };
     const bool idle = !a.running;
-    button(advance(152), L"Instalar patch", true, false, idle, Action::Primary);
-    button(advance(92), L"Solo .exe", false, false, idle, Action::OnlyExe);
-    button(advance(88), L"Solo EFI", false, false, idle, Action::OnlyEfi);
-    button(advance(120), L"Generar driver", false, false, idle, Action::Driver);
-    button(advance(92), L"Verificar", false, false, idle, Action::Verify);
-    button(advance(100), L"Restaurar", false, true, idle, Action::Restore);
+    button(advance(152), T(Str::BtnInstall), true, false, idle, Action::Primary);
+    button(advance(92), T(Str::BtnExeOnly), false, false, idle, Action::OnlyExe);
+    button(advance(88), T(Str::BtnEfiOnly), false, false, idle, Action::OnlyEfi);
+    button(advance(120), T(Str::BtnDriver), false, false, idle, Action::Driver);
+    button(advance(92), T(Str::BtnVerify), false, false, idle, Action::Verify);
+    button(advance(100), T(Str::BtnRestore), false, true, idle, Action::Restore);
 
     // Log
     card(L.logCard, false);
     RECT logTitle{L.logCard.left + a.S(14), L.logCard.top + a.S(10), L.logCard.right - a.S(14),
                   L.logCard.top + a.S(34)};
-    txt(L"Registro", logTitle, a.fBold, cText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    txt(T(Str::LogTitle), logTitle, a.fBold, cText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 }
 
 void create_controls(App& a) {
@@ -831,8 +1145,8 @@ void create_controls(App& a) {
     configure_defaults(a);
     reset_id_fields(a);
     update_custom_enabled(a);
-    append_log(a.eLog, L"Destino: " + default_exe_path().parent_path().wstring());
-    append_log(a.eLog, L"Listo. Selecciona perfil y pulsa Instalar patch.");
+    append_log(a.eLog, std::wstring(T(Str::InitialTarget)) + default_exe_path().parent_path().wstring());
+    append_log(a.eLog, T(Str::InitialReady));
 }
 
 void apply_dark_frame(App& a) {
@@ -878,7 +1192,7 @@ void handle_done(App& a, bool ok, std::wstring* message) {
     delete message;
     if (a.worker.joinable()) a.worker.join();
     set_running_ui(a, false);
-    set_status(a, ok ? Status::Ok : Status::Error, ok ? L"OK" : L"Error");
+    set_status(a, ok ? Status::Ok : Status::Error, ok ? Str::OkStatus : Str::ErrorStatus);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
@@ -897,6 +1211,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         if (!a->dpi) a->dpi = 96;
         create_fonts(*a);
         create_controls(*a);
+        a->tip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr,
+                                 WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, 0, 0, 0, 0, hwnd, nullptr,
+                                 a->inst, nullptr);
+        SendMessageW(a->tip, TTM_SETMAXTIPWIDTH, 0, a->S(320));
         SetWindowSubclass(a->eExe, EditSubclass, 1, 0);
         SetWindowSubclass(a->eEfi, EditSubclass, 1, 0);
         SetWindowSubclass(a->eVmx, EditSubclass, 1, 0);
@@ -1032,8 +1350,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
 
     case WM_CLOSE:
         if (a->running) {
-            MessageBoxW(hwnd, L"Hay una operación en curso. Espera a que termine.", L"VM Spoof",
-                        MB_OK | MB_ICONINFORMATION);
+            MessageBoxW(hwnd, T(Str::BusyMsg), L"VM Spoof", MB_OK | MB_ICONINFORMATION);
             return 0;
         }
         DestroyWindow(hwnd);
@@ -1082,6 +1399,7 @@ int gui_run(HINSTANCE instance) {
     static App app;
     app.inst = instance;
     g_app = &app;
+    g_lang = load_lang();
 
     const int dpi = GetDpiForSystem();
     RECT wr{0, 0, MulDiv(1040, dpi, 96), MulDiv(720, dpi, 96)};
