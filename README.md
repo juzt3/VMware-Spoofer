@@ -42,8 +42,8 @@ carpeta.
 Doble clic en `build\vmspoof-gui.exe` (pide elevación: instala directamente en VMware).
 
 - Tema oscuro, DPI-aware, perfil `Full spoof` / `GPU only` o un JSON personalizado.
-- Detecta la instalación de VMware desde el registro y usa los originales de
-  `back up\` como entrada si existen.
+- Detecta la instalación de VMware desde el registro; la carpeta se puede editar o
+  elegir con `Examinar` y se usa tanto para leer los originales como para instalar.
 - **No hay carpeta de salida**: `Instalar patch` parchea en `%TEMP%` y reemplaza
   `vmware-vmx.exe` / `EFI64.ROM` en `...\VMware Workstation\x64\` con backup atómico.
 - Botones: `Instalar patch` (ambos), `Solo .exe`, `Solo EFI`, `Generar driver`,
@@ -65,7 +65,7 @@ Antes de cada instalación se crea:
 
 `Restaurar` busca un `vmware-vmx.exe` / `EFI64.ROM` original, en este orden:
 
-1. los campos de entrada de la GUI (por defecto `back up\`),
+1. la carpeta de instalación elegida en la GUI (autodetectada por defecto),
 2. `...\x64\vmspoof-original\`,
 3. los backups `backup-*\` cuyo hash coincida con el original,
 4. `VMSPOOF_VMX_ORIG` / `VMSPOOF_EFI_ORIG` y `back up\` junto al repo.

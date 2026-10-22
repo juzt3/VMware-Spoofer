@@ -9,6 +9,7 @@
 #include <dwmapi.h>
 #include <objbase.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <uxtheme.h>
 
 #include <gdiplus.h>
@@ -33,8 +34,7 @@ constexpr UINT WM_APP_LOG = WM_APP + 1;
 constexpr UINT WM_APP_DONE = WM_APP + 2;
 constexpr UINT WM_APP_RUN = WM_APP + 3;
 
-constexpr int ID_EXE = 1001;
-constexpr int ID_EFI = 1002;
+constexpr int ID_DIR = 1001;
 constexpr int ID_VMX = 1003;
 constexpr int ID_GPU_ID = 1005;
 constexpr int ID_AHCI_ID = 1006;
@@ -71,8 +71,7 @@ enum class Action {
     ProfileFull,
     ProfileGpu,
     CustomProfile,
-    BrowseExe,
-    BrowseEfi,
+    BrowseDir,
     BrowseVmx,
     ToggleForce,
     ToggleDry,
@@ -89,7 +88,7 @@ enum class Job { All, Exe, Efi, Driver, Verify, Restore };
 enum class Str {
     FullTitle, FullSub, GpuTitle, GpuSub, CustomProfile, Version, Subtitle,
     Ready, Running, OkStatus, ErrorStatus,
-    LblExe, LblEfi, LblVmx, Browse,
+    LblDir, LblVmx, Browse,
     Overwrite, DryRun, ConfigureVm, CustomIds,
     BtnInstall, BtnExeOnly, BtnEfiOnly, BtnDriver, BtnVerify, BtnRestore, LogTitle,
     ErrMissingVmx, ErrMissingVmxLog, ErrMissingProfile, ErrSelectProfile,
@@ -99,10 +98,10 @@ enum class Str {
     WarnOverwrite, DryRunLog, TargetPrefix,
     Done, ErrPrefix, ErrUnknown,
     RestoreConfirm, RestoreTitle,
-    DlgExeTitle, DlgEfiTitle, DlgVmxTitle, DlgProfileTitle,
-    FilterExe, FilterFirmware, FilterVmx, FilterProfiles,
+    DlgDirTitle, DlgVmxTitle, DlgProfileTitle,
+    FilterVmx, FilterProfiles,
     InitialTarget, InitialReady, BusyMsg,
-    TipFull, TipGpu, TipCustom, TipBrowseExe, TipBrowseEfi, TipBrowseVmx,
+    TipFull, TipGpu, TipCustom, TipBrowseDir, TipBrowseVmx,
     TipOverwrite, TipDry, TipVmx, TipCustomIds,
     TipInstall, TipExeOnly, TipEfiOnly, TipDriver, TipVerify, TipRestore, TipLang,
     Count
@@ -126,8 +125,7 @@ struct App {
     HBRUSH brEdit = nullptr;
     HBRUSH brBg = nullptr;
 
-    HWND eExe = nullptr;
-    HWND eEfi = nullptr;
+    HWND eDir = nullptr;
     HWND eVmx = nullptr;
     HWND eGpuId = nullptr;
     HWND eAhciId = nullptr;
@@ -135,7 +133,7 @@ struct App {
     HWND tip = nullptr;
     std::vector<UINT_PTR> tipIds;
 
-    std::wstring exe, efi, vmx;
+    std::wstring dir, vmx;
     std::wstring customProfile;
 
     int profile = 0; // 0 fullspoof, 1 gpu-only, -1 custom
@@ -155,8 +153,8 @@ struct App {
     bool trackingLeave = false;
 
     struct Layout {
-        RECT rail{}, exeCard{}, efiCard{}, vmxCard{}, logCard{};
-        RECT exeEdit{}, exeBrowse{}, efiEdit{}, efiBrowse{}, vmxEdit{}, vmxBrowse{};
+        RECT rail{}, dirCard{}, vmxCard{}, logCard{};
+        RECT dirEdit{}, dirBrowse{}, vmxEdit{}, vmxBrowse{};
         RECT logEdit{};
         RECT gpuIdEdit{}, ahciIdEdit{};
         int contentX = 0, contentW = 0, optionsY = 0, customY = 0, actionsY = 0;
@@ -206,8 +204,7 @@ const LangText kText[] = {
     {L"Running…", L"Ejecutando…", L"正在运行…"},
     {L"OK", L"OK", L"完成"},
     {L"Error", L"Error", L"错误"},
-    {L"Original vmware-vmx.exe", L"vmware-vmx.exe original", L"原始 vmware-vmx.exe"},
-    {L"Original EFI64.ROM", L"EFI64.ROM original", L"原始 EFI64.ROM"},
+    {L"VMware installation folder", L"Carpeta de instalación de VMware", L"VMware 安装目录"},
     {L"VM .vmx (optional)", L"VM .vmx (opcional)", L"VM .vmx（可选）"},
     {L"Browse…", L"Examinar…", L"浏览…"},
     {L"Overwrite", L"Sobrescribir", L"覆盖"},
@@ -273,18 +270,10 @@ const LangText kText[] = {
         L"- 如果指定了虚拟机，将从 .vmx 中移除加固设置。\n"
         L"- 需要先关闭 VMware。\n\n是否还原？"},
     {L"Restore originals", L"Restaurar originales", L"还原原始文件"},
-    {L"Select vmware-vmx.exe", L"Selecciona vmware-vmx.exe", L"选择 vmware-vmx.exe"},
-    {L"Select EFI64.ROM", L"Selecciona EFI64.ROM", L"选择 EFI64.ROM"},
+    {L"Select the VMware installation folder", L"Selecciona la carpeta de instalación de VMware",
+     L"选择 VMware 安装目录"},
     {L"Select the VM (.vmx)", L"Selecciona la VM (.vmx)", L"选择虚拟机（.vmx）"},
     {L"Select a JSON profile", L"Selecciona un perfil JSON", L"选择 JSON 配置文件"},
-    {
-        L"Executables (*.exe)\0*.exe\0All files (*.*)\0*.*\0\0",
-        L"Ejecutables (*.exe)\0*.exe\0Todos (*.*)\0*.*\0\0",
-        L"可执行文件 (*.exe)\0*.exe\0所有文件 (*.*)\0*.*\0\0"},
-    {
-        L"Firmware (*.ROM;*.rom)\0*.ROM;*.rom\0All files (*.*)\0*.*\0\0",
-        L"Firmware (*.ROM;*.rom)\0*.ROM;*.rom\0Todos (*.*)\0*.*\0\0",
-        L"固件 (*.ROM;*.rom)\0*.ROM;*.rom\0所有文件 (*.*)\0*.*\0\0"},
     {
         L"VMware (*.vmx)\0*.vmx\0All files (*.*)\0*.*\0\0",
         L"VMware (*.vmx)\0*.vmx\0Todos (*.*)\0*.*\0\0",
@@ -315,13 +304,9 @@ const LangText kText[] = {
         L"Carga un perfil JSON personalizado.",
         L"改为加载自定义 JSON 配置。"},
     {
-        L"Pick the original vmware-vmx.exe to patch.",
-        L"Elige el vmware-vmx.exe original a parchear.",
-        L"选择要修改的原始 vmware-vmx.exe。"},
-    {
-        L"Pick the original EFI64.ROM to patch.",
-        L"Elige el EFI64.ROM original a parchear.",
-        L"选择要修改的原始 EFI64.ROM。"},
+        L"Pick the folder where VMware is installed.",
+        L"Elige la carpeta donde está instalado VMware.",
+        L"选择安装 VMware 的目录。"},
     {
         L"Pick a VM; its .vmx gets anti-detection hardening.",
         L"Elige una VM; se aplica hardening anti-detección a su .vmx.",
@@ -512,16 +497,15 @@ void layout(App& a, int W, int H) {
     L.contentX = contentX;
     L.contentW = contentW;
 
-    L.exeCard = {contentX, a.S(88), contentX + contentW, a.S(88) + cardH};
-    L.efiCard = {contentX, a.S(176), contentX + contentW, a.S(176) + cardH};
+    L.dirCard = {contentX, a.S(88), contentX + contentW, a.S(88) + cardH};
 
-    const int rowY = a.S(264);
+    const int rowY = a.S(176);
     L.vmxCard = {contentX, rowY, contentX + contentW, rowY + cardH};
 
-    L.optionsY = a.S(352);
-    L.customY = a.S(390);
-    L.actionsY = a.S(438);
-    L.logCard = {contentX, a.S(496), contentX + contentW, H - margin};
+    L.optionsY = a.S(264);
+    L.customY = a.S(302);
+    L.actionsY = a.S(350);
+    L.logCard = {contentX, a.S(408), contentX + contentW, H - margin};
 
     auto place_edit = [&](HWND h, RECT card, RECT& edit, RECT& browse) {
         edit = {card.left + pad, card.top + editOff, card.right - pad - browseW - a.S(8),
@@ -529,8 +513,7 @@ void layout(App& a, int W, int H) {
         browse = {card.right - pad - browseW, card.top + editOff, card.right - pad, card.top + editOff + editH};
         if (h) MoveWindow(h, edit.left, edit.top, edit.right - edit.left, edit.bottom - edit.top, TRUE);
     };
-    place_edit(a.eExe, L.exeCard, L.exeEdit, L.exeBrowse);
-    place_edit(a.eEfi, L.efiCard, L.efiEdit, L.efiBrowse);
+    place_edit(a.eDir, L.dirCard, L.dirEdit, L.dirBrowse);
     place_edit(a.eVmx, L.vmxCard, L.vmxEdit, L.vmxBrowse);
 
     L.logEdit = inset(L.logCard, pad, a.S(40));
@@ -556,8 +539,7 @@ Str tip_text(Action action) {
     case Action::ProfileFull: return Str::TipFull;
     case Action::ProfileGpu: return Str::TipGpu;
     case Action::CustomProfile: return Str::TipCustom;
-    case Action::BrowseExe: return Str::TipBrowseExe;
-    case Action::BrowseEfi: return Str::TipBrowseEfi;
+    case Action::BrowseDir: return Str::TipBrowseDir;
     case Action::BrowseVmx: return Str::TipBrowseVmx;
     case Action::ToggleForce: return Str::TipOverwrite;
     case Action::ToggleDry: return Str::TipDry;
@@ -640,8 +622,7 @@ void set_status(App& a, Status s, Str text) {
 
 void set_running_ui(App& a, bool running) {
     a.running = running;
-    EnableWindow(a.eExe, !running);
-    EnableWindow(a.eEfi, !running);
+    EnableWindow(a.eDir, !running);
     EnableWindow(a.eVmx, !running);
     update_custom_enabled(a);
     InvalidateRect(a.hwnd, nullptr, FALSE);
@@ -649,9 +630,12 @@ void set_running_ui(App& a, bool running) {
 
 void start_job(App& a, Job job) {
     if (a.running) return;
-    a.exe = get_text(a.eExe);
-    a.efi = get_text(a.eEfi);
+    a.dir = get_text(a.eDir);
     a.vmx = get_text(a.eVmx);
+    if (a.dir.empty()) {
+        a.dir = default_vmware_dir().wstring();
+        SetWindowTextW(a.eDir, a.dir.c_str());
+    }
 
     if (job != Job::Driver && a.optVmx && a.vmx.empty()) {
         set_status(a, Status::Error, Str::ErrMissingVmx);
@@ -678,6 +662,7 @@ void start_job(App& a, Job job) {
     o.force = a.optForce;
     o.dry_run = a.optDry;
     o.install = job != Job::Verify && job != Job::Restore && job != Job::Driver;
+    o.vmware_dir = fs::path(a.dir);
     const fs::path stage = fs::temp_directory_path() /
         ("vmspoof-" + std::to_string(GetCurrentProcessId()) + "-" +
          std::to_string(GetTickCount64()));
@@ -712,18 +697,18 @@ void start_job(App& a, Job job) {
     std::wstring what;
     switch (job) {
     case Job::All:
-        o.in = fs::path(a.exe);
-        o.in_efi = fs::path(a.efi);
+        o.in = target_exe_path(o);
+        o.in_efi = target_efi_path(o);
         o.out_dir = stage;
         what = T(Str::JobAll);
         break;
     case Job::Exe:
-        o.in = fs::path(a.exe.empty() ? default_exe_path().wstring() : a.exe);
+        o.in = target_exe_path(o);
         o.out = stage / "vmware-vmx.patched.exe";
         what = T(Str::JobExe);
         break;
     case Job::Efi:
-        o.in = fs::path(a.efi.empty() ? default_efi_path().wstring() : a.efi);
+        o.in = target_efi_path(o);
         o.out = stage / "EFI64.patched";
         what = T(Str::JobEfi);
         break;
@@ -731,13 +716,13 @@ void start_job(App& a, Job job) {
         what = T(Str::JobDriver);
         break;
     case Job::Verify:
-        o.in = default_exe_path();
-        o.out = default_efi_path();
+        o.in = target_exe_path(o);
+        o.out = target_efi_path(o);
         what = T(Str::JobVerify);
         break;
     case Job::Restore:
-        o.in = fs::path(a.exe);
-        o.in_efi = fs::path(a.efi);
+        o.in = target_exe_path(o);
+        o.in_efi = target_efi_path(o);
         what = T(Str::JobRestore);
         break;
     }
@@ -747,7 +732,7 @@ void start_job(App& a, Job job) {
     if (o.install && !a.optDry) append_log(a.eLog, T(Str::WarnOverwrite));
     if (a.optDry) append_log(a.eLog, T(Str::DryRunLog));
     if (job == Job::Restore)
-        append_log(a.eLog, std::wstring(T(Str::TargetPrefix)) + default_exe_path().wstring());
+        append_log(a.eLog, std::wstring(T(Str::TargetPrefix)) + target_exe_path(o).wstring());
 
     set_status(a, Status::Running, Str::Running);
     set_running_ui(a, true);
@@ -782,34 +767,30 @@ void start_job(App& a, Job job) {
     });
 }
 
-fs::path gui_exe_dir() {
-    wchar_t buf[32768]{};
-    const DWORD n = GetModuleFileNameW(nullptr, buf, DWORD(std::size(buf)));
-    if (n == 0) return fs::current_path();
-    return fs::path(std::wstring(buf, n)).parent_path();
+void configure_defaults(App& a) {
+    a.dir = default_vmware_dir().wstring();
+    SetWindowTextW(a.eDir, a.dir.c_str());
 }
 
-void configure_defaults(App& a) {
-    std::error_code ec;
-    const fs::path root = (gui_exe_dir() / "..").lexically_normal();
-    const fs::path repo_exe = root / "back up" / "vmware-vmx.exe";
-    const fs::path repo_efi = root / "back up" / "EFI64.ROM";
-    a.exe = (fs::exists(repo_exe, ec) ? repo_exe : default_exe_path()).wstring();
-    a.efi = (fs::exists(repo_efi, ec) ? repo_efi : default_efi_path()).wstring();
-    SetWindowTextW(a.eExe, a.exe.c_str());
-    SetWindowTextW(a.eEfi, a.efi.c_str());
+std::wstring open_folder(HWND owner, const wchar_t* title) {
+    BROWSEINFOW bi{};
+    bi.hwndOwner = owner;
+    bi.lpszTitle = title;
+    bi.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    LPITEMIDLIST id = SHBrowseForFolderW(&bi);
+    if (!id) return {};
+    wchar_t buf[32768]{};
+    const bool ok = SHGetPathFromIDListW(id, buf) != FALSE;
+    CoTaskMemFree(id);
+    return ok ? std::wstring(buf) : std::wstring();
 }
 
 void browse(App& a, Action action) {
     std::wstring value;
     switch (action) {
-    case Action::BrowseExe:
-        value = open_file(a.hwnd, T(Str::DlgExeTitle), T(Str::FilterExe));
-        if (!value.empty()) SetWindowTextW(a.eExe, value.c_str());
-        break;
-    case Action::BrowseEfi:
-        value = open_file(a.hwnd, T(Str::DlgEfiTitle), T(Str::FilterFirmware));
-        if (!value.empty()) SetWindowTextW(a.eEfi, value.c_str());
+    case Action::BrowseDir:
+        value = open_folder(a.hwnd, T(Str::DlgDirTitle));
+        if (!value.empty()) SetWindowTextW(a.eDir, value.c_str());
         break;
     case Action::BrowseVmx:
         value = open_file(a.hwnd, T(Str::DlgVmxTitle), T(Str::FilterVmx));
@@ -1025,13 +1006,9 @@ void render(App& a, HDC dc, const RECT& client) {
         hit(r, action, !a.running);
     };
 
-    card(L.exeCard, false);
-    label(L.exeCard, T(Str::LblExe));
-    browse_btn(L.exeBrowse, Action::BrowseExe);
-
-    card(L.efiCard, false);
-    label(L.efiCard, T(Str::LblEfi));
-    browse_btn(L.efiBrowse, Action::BrowseEfi);
+    card(L.dirCard, false);
+    label(L.dirCard, T(Str::LblDir));
+    browse_btn(L.dirBrowse, Action::BrowseDir);
 
     card(L.vmxCard, a.optVmx);
     label(L.vmxCard, T(Str::LblVmx));
@@ -1134,8 +1111,7 @@ void create_controls(App& a) {
         SetWindowTheme(h, L"DarkMode_Explorer", nullptr);
         return h;
     };
-    a.eExe = make_edit(ID_EXE, false, a.fBody);
-    a.eEfi = make_edit(ID_EFI, false, a.fBody);
+    a.eDir = make_edit(ID_DIR, false, a.fBody);
     a.eVmx = make_edit(ID_VMX, false, a.fBody);
     a.eGpuId = make_edit(ID_GPU_ID, false, a.fBody);
     a.eAhciId = make_edit(ID_AHCI_ID, false, a.fBody);
@@ -1144,7 +1120,7 @@ void create_controls(App& a) {
     configure_defaults(a);
     reset_id_fields(a);
     update_custom_enabled(a);
-    append_log(a.eLog, std::wstring(T(Str::InitialTarget)) + default_exe_path().parent_path().wstring());
+    append_log(a.eLog, std::wstring(T(Str::InitialTarget)) + a.dir);
     append_log(a.eLog, T(Str::InitialReady));
 }
 
@@ -1162,8 +1138,7 @@ void apply_dark_frame(App& a) {
 
 void recreate_fonts(App& a) {
     create_fonts(a);
-    set_font(a.eExe, a.fBody);
-    set_font(a.eEfi, a.fBody);
+    set_font(a.eDir, a.fBody);
     set_font(a.eVmx, a.fBody);
     set_font(a.eGpuId, a.fBody);
     set_font(a.eAhciId, a.fBody);
@@ -1214,8 +1189,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
                                  WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, 0, 0, 0, 0, hwnd, nullptr,
                                  a->inst, nullptr);
         SendMessageW(a->tip, TTM_SETMAXTIPWIDTH, 0, a->S(320));
-        SetWindowSubclass(a->eExe, EditSubclass, 1, 0);
-        SetWindowSubclass(a->eEfi, EditSubclass, 1, 0);
+        SetWindowSubclass(a->eDir, EditSubclass, 1, 0);
         SetWindowSubclass(a->eVmx, EditSubclass, 1, 0);
         apply_dark_frame(*a);
         return 0;
@@ -1323,8 +1297,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM w, LPARAM l) {
         a->pressed = Action::None;
         InvalidateRect(hwnd, nullptr, FALSE);
         if (action != Action::None && action == pressed) {
-            if (action == Action::BrowseExe || action == Action::BrowseEfi ||
-                action == Action::BrowseVmx) {
+            if (action == Action::BrowseDir || action == Action::BrowseVmx) {
                 browse(*a, action);
             } else {
                 handle_action(*a, action);

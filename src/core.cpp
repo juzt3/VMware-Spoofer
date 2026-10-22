@@ -855,7 +855,7 @@ fs::path find_original_file(const fs::path& explicit_path, const fs::path& targe
         }
     }
     fail("restore: no se encontró un " + target.filename().string() +
-         " original válido. Guarda una copia original, crea un backup, o selecciónalo en la GUI.");
+         " original válido. Guarda una copia original o crea un backup.");
 }
 
 void unconfigure_vmx(const fs::path& vmx_path, const Log& log) {
@@ -1268,17 +1268,28 @@ fs::path default_vmware_dir() {
     return fs::path(L"C:\\Program Files (x86)\\VMware\\VMware Workstation");
 }
 
-fs::path vmware_bin_dir() {
-    const fs::path dir = default_vmware_dir();
+fs::path vmware_bin_dir(const fs::path& root) {
     std::error_code ec;
-    const fs::path x64 = dir / "x64";
+    const fs::path x64 = root / "x64";
     if (fs::exists(x64, ec)) return x64;
-    return dir;
+    return root;
 }
+
+fs::path vmware_bin_dir() { return vmware_bin_dir(default_vmware_dir()); }
 
 fs::path default_exe_path() { return vmware_bin_dir() / "vmware-vmx.exe"; }
 
 fs::path default_efi_path() { return vmware_bin_dir() / "EFI64.ROM"; }
+
+fs::path target_exe_path(const Options& options) {
+    const fs::path root = options.vmware_dir.empty() ? default_vmware_dir() : options.vmware_dir;
+    return vmware_bin_dir(root) / "vmware-vmx.exe";
+}
+
+fs::path target_efi_path(const Options& options) {
+    const fs::path root = options.vmware_dir.empty() ? default_vmware_dir() : options.vmware_dir;
+    return vmware_bin_dir(root) / "EFI64.ROM";
+}
 
 fs::path default_out_dir() {
     std::error_code ec;
@@ -1632,7 +1643,7 @@ Result patch_vmx(const Profile& profile_in, const Options& options, const Log& l
             fail("vmware-vmx.exe: SHA-256 no coincide\n  esperado: " + profile.exe_sha256 +
                  "\n  obtenido: " + r.in_sha256 +
                  "\nParece un build distinto o un archivo ya parcheado con otro perfil."
-                 "\nUsa el original de 'back up' o activa Sobrescribir si el build es compatible.");
+                 "\nUsa una copia original o activa Sobrescribir si el build es compatible.");
         if (!matches_orig && !matches_expected) {
             r.warnings.push_back("La entrada no es el original; se reutiliza como base ya parcheada.");
             log_line(log, "AVISO: entrada no original; se valida contra los valores conocidos del perfil.");
@@ -1654,8 +1665,8 @@ Result patch_vmx(const Profile& profile_in, const Options& options, const Log& l
             write_file_atomic(options.out, data, options.force);
             log_line(log, "Escrito: " + to_utf8(options.out));
             if (options.install) {
-                save_original_stash(options.in, default_exe_path(), profile.exe_sha256, log);
-                install_one(options.out, default_exe_path(), log);
+                save_original_stash(options.in, target_exe_path(options), profile.exe_sha256, log);
+                install_one(options.out, target_exe_path(options), log);
             }
             r.ok = true;
             write_report_if_requested(options.report, r.to_json());
@@ -1720,7 +1731,7 @@ Result patch_efi(const Profile& profile_in, const Options& options, const Log& l
         if (!matches_orig && !already && !options.force && !(has_overrides && known_state))
             fail("EFI64.ROM: SHA-256 no coincide y el DXE no está en un estado conocido\n"
                  "  esperado: " + profile.efi_sha256 + "\n  obtenido: " + r.in_sha256 +
-                 "\nUsa el original de 'back up' o activa Sobrescribir si el build es compatible.");
+                 "\nUsa una copia original o activa Sobrescribir si el build es compatible.");
 
         if (already) {
             log_line(log, "AVISO: el EFI ya tiene los IDs del perfil; se reutiliza sin recomprimir.");
@@ -1732,8 +1743,8 @@ Result patch_efi(const Profile& profile_in, const Options& options, const Log& l
                 write_file_atomic(options.out, rom, options.force);
                 log_line(log, "Escrito: " + to_utf8(options.out));
                 if (options.install) {
-                    save_original_stash(options.in, default_efi_path(), profile.efi_sha256, log);
-                    install_one(options.out, default_efi_path(), log);
+                    save_original_stash(options.in, target_efi_path(options), profile.efi_sha256, log);
+                    install_one(options.out, target_efi_path(options), log);
                 }
                 r.ok = true;
                 write_report_if_requested(options.report, r.to_json());
@@ -1786,8 +1797,8 @@ Result patch_efi(const Profile& profile_in, const Options& options, const Log& l
             write_file_atomic(options.out, out, options.force);
             log_line(log, "Escrito: " + to_utf8(options.out));
             if (options.install) {
-                save_original_stash(options.in, default_efi_path(), profile.efi_sha256, log);
-                install_one(options.out, default_efi_path(), log);
+                save_original_stash(options.in, target_efi_path(options), profile.efi_sha256, log);
+                install_one(options.out, target_efi_path(options), log);
             }
             r.ok = true;
             write_report_if_requested(options.report, r.to_json());
@@ -1800,8 +1811,8 @@ Result patch_efi(const Profile& profile_in, const Options& options, const Log& l
 
 Result patch_all(const Profile& profile, const Options& options, const Log& log) {
     return run_guarded("patch-all", profile, log, [&](Report& r) {
-        const fs::path in_exe = options.in.empty() ? default_exe_path() : options.in;
-        const fs::path in_efi = options.in_efi.empty() ? default_efi_path() : options.in_efi;
+        const fs::path in_exe = options.in.empty() ? target_exe_path(options) : options.in;
+        const fs::path in_efi = options.in_efi.empty() ? target_efi_path(options) : options.in_efi;
         const fs::path out_dir = options.out_dir.empty() ? default_out_dir() : options.out_dir;
         const fs::path out_exe = out_dir / "vmware-vmx.patched.exe";
         const fs::path out_efi = out_dir / "EFI64.patched";
@@ -1978,8 +1989,8 @@ Result verify(const Profile& profile_in, const Options& options, const Log& log)
 
 Result restore_vmware(const Profile& profile, const Options& options, const Log& log) {
     return run_guarded("restore", profile, log, [&](Report& r) {
-        const fs::path target_exe = default_exe_path();
-        const fs::path target_efi = default_efi_path();
+        const fs::path target_exe = target_exe_path(options);
+        const fs::path target_efi = target_efi_path(options);
         r.in_path = to_utf8(target_exe.parent_path());
         r.out_path = r.in_path;
 

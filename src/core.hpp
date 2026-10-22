@@ -49,6 +49,7 @@ struct Options {
     fs::path out;       // exe or ROM output, ROM for verify
     fs::path in_efi;    // patch-all
     fs::path out_dir;   // patch-all
+    fs::path vmware_dir; // instalación de VMware; vacío = autodetectar
     fs::path vmx;
     fs::path report;
     std::optional<std::pair<uint16_t, uint16_t>> svga_id; // vid, did
@@ -141,8 +142,11 @@ Result manifest_diff(const fs::path& original, const fs::path& patched, const fs
                      bool force, const Log& log);
 
 fs::path default_vmware_dir();
+fs::path vmware_bin_dir(const fs::path& root);
 fs::path default_exe_path();
 fs::path default_efi_path();
 fs::path default_out_dir();
+fs::path target_exe_path(const Options& options);
+fs::path target_efi_path(const Options& options);
 
 } // namespace vmspoof
